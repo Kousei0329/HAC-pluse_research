@@ -37,6 +37,9 @@ from utils.encodings_cuda import \
     encoder_gaussian_chunk, decoder_gaussian_chunk, encoder_gaussian_mixed_chunk, decoder_gaussian_mixed_chunk
 from utils.gpcc_utils import compress_gpcc, decompress_gpcc, calculate_morton_order
 
+from .masked_conv import MaskedConv2d, MaskedConv1d
+from .pointnet import PointNet
+
 bit2MB_scale = 8 * 1024 * 1024
 MAX_batch_size = 3000
 
@@ -113,58 +116,453 @@ class mix_3D2D_encoding(nn.Module):
         out_i = torch.cat([out_xyz, out_xy, out_xz, out_yz], dim=-1)  # [..., 56]
         return out_i
 
-class Channel_CTX_fea(nn.Module):
-    def __init__(self):
+class SpatialContextModule(nn.Module):
+    """
+    近傍アンカーの空間情報を集約してコンテキストとして利用するモジュール
+    """
+    def __init__(self, k_neighbors=16, feat_dim=48):
         super().__init__()
-        self.MLP_d0 = nn.Sequential(
-            nn.Linear(50*3+10*0, 20*2),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(20*2, 10*3),
+        self.k = k_neighbors
+        # 近傍情報の集約
+        self.neighbor_mlp = nn.Sequential(
+            nn.Linear(feat_dim + 3, feat_dim),  # hash_feat + relative_pos
+            nn.ReLU(),
+            nn.Linear(feat_dim, feat_dim)
         )
-        self.MLP_d1 = nn.Sequential(
-            nn.Linear(50*3+10*1, 20*2),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(20*2, 10*3),
+        # アテンションベースの重み付け
+        self.attention = nn.Sequential(
+            nn.Linear(feat_dim, feat_dim // 4),
+            nn.ReLU(),
+            nn.Linear(feat_dim // 4, 1)
         )
-        self.MLP_d2 = nn.Sequential(
-            nn.Linear(50*3+10*2, 20*2),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(20*2, 10*3),
+
+    def forward(self, anchors, hash_feats):
+        """
+        Args:
+            anchors: [N, 3] アンカー座標
+            hash_feats: [N, feat_dim] ハッシュ特徴
+        Returns:
+            [N, feat_dim] 空間コンテキストが統合されたハッシュ特徴
+        """
+        N = anchors.shape[0]
+
+        # 少数のアンカーの場合はスキップ
+        if N < self.k:
+            return hash_feats
+
+        # K-NN探索（メモリ効率的な実装）
+        # バッチサイズを制限して処理
+        batch_size = 1024  # メモリに応じて調整可能
+        k = min(self.k + 1, N)  # 自分自身を含むため+1
+
+        all_indices = []
+
+        for i in range(0, N, batch_size):
+            end_i = min(i + batch_size, N)
+            batch_anchors = anchors[i:end_i]  # [B, 3]
+
+            # バッチごとに距離計算
+            # [B, N] の距離行列（全体ではなくバッチのみ）
+            dists = torch.cdist(batch_anchors, anchors)  # [B, N]
+
+            # 各点のK近傍を取得
+            _, batch_indices = torch.topk(dists, k=k, largest=False, dim=-1)  # [B, K]
+            all_indices.append(batch_indices)
+
+        # 全バッチの結果を結合
+        indices = torch.cat(all_indices, dim=0)  # [N, K]
+
+        # 自分自身を除外（最も近い点は自分自身のため）
+        indices = indices[:, 1:]  # [N, K-1]
+
+        # 近傍特徴の取得
+        neighbor_feats = hash_feats[indices]  # [N, K-1, feat_dim]
+        relative_pos = anchors.unsqueeze(1) - anchors[indices]  # [N, K-1, 3]
+
+        # 特徴変換
+        combined = torch.cat([neighbor_feats, relative_pos], dim=-1)
+        neighbor_context = self.neighbor_mlp(combined)  # [N, K-1, feat_dim]
+
+        # アテンション重み
+        attn_weights = torch.softmax(
+            self.attention(neighbor_context), dim=1
+        )  # [N, K-1, 1]
+
+        # コンテキスト集約
+        spatial_context = (neighbor_context * attn_weights).sum(dim=1)  # [N, feat_dim]
+
+        # 元のハッシュ特徴と融合（残差接続）
+        return hash_feats + spatial_context
+
+class JointContextModule(nn.Module):
+	def __init__(self, dim_in):
+		super(JointContextModule, self).__init__()
+		# Use Conv1d for coordinate data [N, 3]
+		# Input: coordinates x [N, 3]
+		# Output: context features [N, 384]
+		self.masked = MaskedConv1d("A", in_channels=3, out_channels=48, kernel_size=5, stride=1, padding=2)
+
+		# MLP to combine hash features and context features
+		# Input: hash_feats (dim_in) + context (384) = dim_in + 384
+		# Output: dim_in (same as hash features)
+		self.fusion_mlp = nn.Sequential(
+			nn.Linear(dim_in + 48, 256),
+			nn.ReLU(inplace=True),
+			nn.Linear(256, dim_in)
+		)
+
+	def forward(self, x, hash_feats):
+		# Apply masked conv to coordinates to get context features
+		# x: [N, 3] coordinates
+		context_feats = self.masked(x)  # [N, 384]
+		# Concatenate hash features and context features
+		combined = torch.cat([hash_feats, context_feats], dim=1)  # [N, dim_in + 384]
+		# Pass through MLP to get final features with same dimension as hash_feats
+		output = self.fusion_mlp(combined)  # [N, dim_in]
+		return output
+
+class JointPointNetModule(nn.Module):
+    def __init__(self, dim_in):
+        super(JointPointNetModule, self).__init__()
+        self.pointnet = PointNet(out_dim=48)
+
+        # MLP to combine hash features and context features
+        # Input: hash_feats (dim_in) + context (48) = dim_in + 48
+        # Output: dim_in (same as hash features)
+        self.fusion_mlp = nn.Sequential(
+            nn.Linear(dim_in + 48, 256),
+            nn.ReLU(inplace=True),
+            nn.Linear(256, dim_in)
         )
-        self.MLP_d3 = nn.Sequential(
-            nn.Linear(50*3+10*3, 20*2),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(20*2, 10*3),
-        )
-        self.MLP_d4 = nn.Sequential(
-            nn.Linear(50*3+10*4, 20*2),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(20*2, 10*3),
-        )
+
+    def forward(self, x, hash_feats):
+        # Apply PointNet to coordinates to get context features
+        # x: [N, 3] coordinates
+        context_feats = self.pointnet(x)  # [N, 48]
+        # Concatenate hash features and context features
+        combined = torch.cat([hash_feats, context_feats], dim=1)  # [N, dim_in + 48]
+        # Pass through MLP to get final features with same dimension as hash_feats
+        output = self.fusion_mlp(combined)  # [N, dim_in]
+        return output
+
+
+class Channel_CTX_fea(nn.Module):
+    def __init__(self, use_gated=False):
+        super().__init__()
+        self.use_gated = use_gated
+
+        if use_gated:
+            # Gated MLP (10分割): 出力に gate を追加 (mean, scale, prob, gate の4つ)
+            # 各チャネル5次元
+            self.MLP_d0 = nn.Sequential(
+                nn.Linear(50*3+5*0, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),  # 5*4 = mean(5) + scale(5) + prob(5) + gate(5)
+            )
+            self.MLP_d1 = nn.Sequential(
+                nn.Linear(50*3+5*1, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d2 = nn.Sequential(
+                nn.Linear(50*3+5*2, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d3 = nn.Sequential(
+                nn.Linear(50*3+5*3, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d4 = nn.Sequential(
+                nn.Linear(50*3+5*4, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d5 = nn.Sequential(
+                nn.Linear(50*3+5*5, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d6 = nn.Sequential(
+                nn.Linear(50*3+5*6, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d7 = nn.Sequential(
+                nn.Linear(50*3+5*7, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d8 = nn.Sequential(
+                nn.Linear(50*3+5*8, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*4),
+            )
+            self.MLP_d9 = nn.Sequential(
+                nn.Linear(50*3+5*9, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 5*3),  # 最後のチャネルはgateを出力しない
+            )
+        else:
+            # 元の実装 (5分割)
+            self.MLP_d0 = nn.Sequential(
+                nn.Linear(50*3+10*0, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 10*3),
+            )
+            self.MLP_d1 = nn.Sequential(
+                nn.Linear(50*3+10*1, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 10*3),
+            )
+            self.MLP_d2 = nn.Sequential(
+                nn.Linear(50*3+10*2, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 10*3),
+            )
+            self.MLP_d3 = nn.Sequential(
+                nn.Linear(50*3+10*3, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 10*3),
+            )
+            self.MLP_d4 = nn.Sequential(
+                nn.Linear(50*3+10*4, 20*2),
+                nn.LeakyReLU(inplace=True),
+                nn.Linear(20*2, 10*3),
+            )
 
     def forward(self, fea_q, mean_scale, to_dec=-1):  # chctx_v3
         # fea_q: [N, 50]
-        d0, d1, d2, d3, d4 = torch.split(fea_q, split_size_or_sections=[10, 10, 10, 10, 10], dim=-1)
-        mean_d0, scale_d0, prob_d0 = torch.chunk(self.MLP_d0(torch.cat([mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d1, scale_d1, prob_d1 = torch.chunk(self.MLP_d1(torch.cat([d0, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d2, scale_d2, prob_d2 = torch.chunk(self.MLP_d2(torch.cat([d0, d1, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d3, scale_d3, prob_d3 = torch.chunk(self.MLP_d3(torch.cat([d0, d1, d2, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d4, scale_d4, prob_d4 = torch.chunk(self.MLP_d4(torch.cat([d0, d1, d2, d3, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_adj = torch.cat([mean_d0, mean_d1, mean_d2, mean_d3, mean_d4], dim=-1)
-        scale_adj = torch.cat([scale_d0, scale_d1, scale_d2, scale_d3, scale_d4], dim=-1)
-        prob_adj = torch.cat([prob_d0, prob_d1, prob_d2, prob_d3, prob_d4], dim=-1)
 
-        if to_dec == 0:
-            return mean_d0, scale_d0, prob_d0
-        if to_dec == 1:
-            return mean_d1, scale_d1, prob_d1
-        if to_dec == 2:
-            return mean_d2, scale_d2, prob_d2
-        if to_dec == 3:
-            return mean_d3, scale_d3, prob_d3
-        if to_dec == 4:
-            return mean_d4, scale_d4, prob_d4
-        return mean_adj, scale_adj, prob_adj
+        if self.use_gated:
+            # 10分割: 各5次元
+            d0, d1, d2, d3, d4, d5, d6, d7, d8, d9 = torch.split(fea_q, split_size_or_sections=[5]*10, dim=-1)
+
+            # Gated MLP: gate で情報を選択的に伝播
+            out_d0 = self.MLP_d0(torch.cat([mean_scale], dim=-1))
+            mean_d0, scale_d0, prob_d0, gate_d0 = torch.chunk(out_d0, chunks=4, dim=-1)
+            gate_d0 = torch.sigmoid(gate_d0)
+
+            out_d1 = self.MLP_d1(torch.cat([d0 * gate_d0, mean_scale], dim=-1))
+            mean_d1, scale_d1, prob_d1, gate_d1 = torch.chunk(out_d1, chunks=4, dim=-1)
+            gate_d1 = torch.sigmoid(gate_d1)
+
+            out_d2 = self.MLP_d2(torch.cat([d0 * gate_d0, d1 * gate_d1, mean_scale], dim=-1))
+            mean_d2, scale_d2, prob_d2, gate_d2 = torch.chunk(out_d2, chunks=4, dim=-1)
+            gate_d2 = torch.sigmoid(gate_d2)
+
+            out_d3 = self.MLP_d3(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, mean_scale], dim=-1))
+            mean_d3, scale_d3, prob_d3, gate_d3 = torch.chunk(out_d3, chunks=4, dim=-1)
+            gate_d3 = torch.sigmoid(gate_d3)
+
+            out_d4 = self.MLP_d4(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, mean_scale], dim=-1))
+            mean_d4, scale_d4, prob_d4, gate_d4 = torch.chunk(out_d4, chunks=4, dim=-1)
+            gate_d4 = torch.sigmoid(gate_d4)
+
+            out_d5 = self.MLP_d5(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, mean_scale], dim=-1))
+            mean_d5, scale_d5, prob_d5, gate_d5 = torch.chunk(out_d5, chunks=4, dim=-1)
+            gate_d5 = torch.sigmoid(gate_d5)
+
+            out_d6 = self.MLP_d6(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, mean_scale], dim=-1))
+            mean_d6, scale_d6, prob_d6, gate_d6 = torch.chunk(out_d6, chunks=4, dim=-1)
+            gate_d6 = torch.sigmoid(gate_d6)
+
+            out_d7 = self.MLP_d7(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, d6 * gate_d6, mean_scale], dim=-1))
+            mean_d7, scale_d7, prob_d7, gate_d7 = torch.chunk(out_d7, chunks=4, dim=-1)
+            gate_d7 = torch.sigmoid(gate_d7)
+
+            out_d8 = self.MLP_d8(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, d6 * gate_d6, d7 * gate_d7, mean_scale], dim=-1))
+            mean_d8, scale_d8, prob_d8, gate_d8 = torch.chunk(out_d8, chunks=4, dim=-1)
+            gate_d8 = torch.sigmoid(gate_d8)
+
+            out_d9 = self.MLP_d9(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, d6 * gate_d6, d7 * gate_d7, d8 * gate_d8, mean_scale], dim=-1))
+            mean_d9, scale_d9, prob_d9 = torch.chunk(out_d9, chunks=3, dim=-1)
+
+            mean_adj = torch.cat([mean_d0, mean_d1, mean_d2, mean_d3, mean_d4, mean_d5, mean_d6, mean_d7, mean_d8, mean_d9], dim=-1)
+            scale_adj = torch.cat([scale_d0, scale_d1, scale_d2, scale_d3, scale_d4, scale_d5, scale_d6, scale_d7, scale_d8, scale_d9], dim=-1)
+            prob_adj = torch.cat([prob_d0, prob_d1, prob_d2, prob_d3, prob_d4, prob_d5, prob_d6, prob_d7, prob_d8, prob_d9], dim=-1)
+
+            if to_dec == 0:
+                return mean_d0, scale_d0, prob_d0
+            if to_dec == 1:
+                return mean_d1, scale_d1, prob_d1
+            if to_dec == 2:
+                return mean_d2, scale_d2, prob_d2
+            if to_dec == 3:
+                return mean_d3, scale_d3, prob_d3
+            if to_dec == 4:
+                return mean_d4, scale_d4, prob_d4
+            if to_dec == 5:
+                return mean_d5, scale_d5, prob_d5
+            if to_dec == 6:
+                return mean_d6, scale_d6, prob_d6
+            if to_dec == 7:
+                return mean_d7, scale_d7, prob_d7
+            if to_dec == 8:
+                return mean_d8, scale_d8, prob_d8
+            if to_dec == 9:
+                return mean_d9, scale_d9, prob_d9
+            return mean_adj, scale_adj, prob_adj
+        else:
+            # 元の実装 (5分割)
+            d0, d1, d2, d3, d4 = torch.split(fea_q, split_size_or_sections=[10, 10, 10, 10, 10], dim=-1)
+            mean_d0, scale_d0, prob_d0 = torch.chunk(self.MLP_d0(torch.cat([mean_scale], dim=-1)), chunks=3, dim=-1)
+            mean_d1, scale_d1, prob_d1 = torch.chunk(self.MLP_d1(torch.cat([d0, mean_scale], dim=-1)), chunks=3, dim=-1)
+            mean_d2, scale_d2, prob_d2 = torch.chunk(self.MLP_d2(torch.cat([d0, d1, mean_scale], dim=-1)), chunks=3, dim=-1)
+            mean_d3, scale_d3, prob_d3 = torch.chunk(self.MLP_d3(torch.cat([d0, d1, d2, mean_scale], dim=-1)), chunks=3, dim=-1)
+            mean_d4, scale_d4, prob_d4 = torch.chunk(self.MLP_d4(torch.cat([d0, d1, d2, d3, mean_scale], dim=-1)), chunks=3, dim=-1)
+
+            mean_adj = torch.cat([mean_d0, mean_d1, mean_d2, mean_d3, mean_d4], dim=-1)
+            scale_adj = torch.cat([scale_d0, scale_d1, scale_d2, scale_d3, scale_d4], dim=-1)
+            prob_adj = torch.cat([prob_d0, prob_d1, prob_d2, prob_d3, prob_d4], dim=-1)
+
+            if to_dec == 0:
+                return mean_d0, scale_d0, prob_d0
+            if to_dec == 1:
+                return mean_d1, scale_d1, prob_d1
+            if to_dec == 2:
+                return mean_d2, scale_d2, prob_d2
+            if to_dec == 3:
+                return mean_d3, scale_d3, prob_d3
+            if to_dec == 4:
+                return mean_d4, scale_d4, prob_d4
+            return mean_adj, scale_adj, prob_adj
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+# class Channel_CTX_fea(nn.Module):
+#     """
+#     Transformer版 Channel Context モジュール
+
+#     fea_q: [N, 50]  -> 10トークン (各5次元)
+#     mean_scale: [N, 150] (たぶん 50*3)
+
+#     use_gated:
+#       - False: 各トークンごとに mean(5), scale(5), prob(5) の 15次元
+#       - True : 各トークンごとに mean(5), scale(5), prob(5), gate(5) の 20次元
+#                （最後の to_dec=9 ケースでも gate まで出しておく）
+
+#     Transformer で 10チャネル分を一気に処理して、
+#     最後に [N, 10, 5] -> [N, 50] に reshape して返す。
+#     """
+
+#     def __init__(
+#         self,
+#         use_gated: bool = False,
+#         d_model: int = 64,
+#         nhead: int = 4,
+#         num_layers: int = 2,
+#         dim_feedforward: int = 256,
+#         dropout: float = 0.0,
+#     ):
+#         super().__init__()
+#         self.use_gated = use_gated
+#         self.d_model = d_model
+
+#         # fea_q を 5次元 → d_model に写像
+#         self.fea_embed = nn.Linear(5, d_model)
+
+#         # mean_scale (たぶん 150次元) を d_model に圧縮して、全トークンに足し込む
+#         self.cond_proj = nn.Linear(50 * 3, d_model)
+
+#         # 位置埋め込み (10トークン固定想定)
+#         self.pos_embed = nn.Parameter(torch.zeros(1, 10, d_model))
+#         nn.init.normal_(self.pos_embed, mean=0.0, std=0.02)
+
+#         # Transformer Encoder
+#         encoder_layer = nn.TransformerEncoderLayer(
+#             d_model=d_model,
+#             nhead=nhead,
+#             dim_feedforward=dim_feedforward,
+#             dropout=dropout,
+#             activation="gelu",
+#             batch_first=True,  # [B, L, D] 形式を使う
+#         )
+#         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+#         # 出力ヘッド
+#         if use_gated:
+#             out_dim = 5 * 4  # mean, scale, prob, gate
+#         else:
+#             out_dim = 5 * 3  # mean, scale, prob
+
+#         self.out_proj = nn.Linear(d_model, out_dim)
+
+#     def forward(self, fea_q: torch.Tensor, mean_scale: torch.Tensor, to_dec: int = -1):
+#         """
+#         fea_q: [N, 50]
+#         mean_scale: [N, 150] (想定)
+#         to_dec:
+#           - -1 のとき: 全チャネル分 [N, 50] を返す
+#           - 0〜9 のとき: 対応するチャネルだけ [N, 5] を返す
+#         """
+#         B, C = fea_q.shape
+#         assert C == 50, f"fea_q のチャネル数が想定(50)と違う: {C}"
+
+#         # 10トークン × 5次元に分割: [N, 50] -> [N, 10, 5]
+#         fea_seq = fea_q.view(B, 10, 5)
+
+#         # 入力埋め込み
+#         x = self.fea_embed(fea_seq)  # [N, 10, d_model]
+
+#         # コンディション (mean_scale) を全トークンにブロードキャストして加算
+#         assert mean_scale.dim() == 2, "mean_scale は [N, 150] の2次元テンソルを想定"
+#         cond = self.cond_proj(mean_scale)  # [N, d_model]
+#         cond = cond.unsqueeze(1)  # [N, 1, d_model]
+#         x = x + cond + self.pos_embed  # [N, 10, d_model]
+
+#         # Transformer Encoder
+#         # ※ ここでは因果マスク無し（全チャネル双方向注意）にしている。
+#         #   ARな条件付き分布を厳密に守りたければ causal mask を入れる必要あり。
+#         x = self.encoder(x)  # [N, 10, d_model]
+
+#         # 出力: [N, 10, out_dim]
+#         out = self.out_proj(x)
+
+#         if self.use_gated:
+#             # [N, 10, 20] -> 各 5次元に分割
+#             mean, scale, prob, gate = torch.chunk(out, chunks=4, dim=-1)
+#             gate = torch.sigmoid(gate)
+
+#             # to_dec 指定がある場合は、そのチャネルのみを返す
+#             if 0 <= to_dec <= 9:
+#                 # [N, 5] を返す
+#                 return (
+#                     mean[:, to_dec, :],
+#                     scale[:, to_dec, :],
+#                     prob[:, to_dec, :],
+#                     gate[:, to_dec, :],
+#                 )
+
+#             # 全チャネルまとめて [N, 50] で返す
+#             mean_adj = mean.reshape(B, -1)   # [N, 50]
+#             scale_adj = scale.reshape(B, -1) # [N, 50]
+#             prob_adj = prob.reshape(B, -1)   # [N, 50]
+
+#             return mean_adj, scale_adj, prob_adj, gate.reshape(B, -1)
+
+#         else:
+#             # [N, 10, 15] -> 各 5次元に分割
+#             mean, scale, prob = torch.chunk(out, chunks=3, dim=-1)
+
+#             if 0 <= to_dec <= 9:
+#                 return (
+#                     mean[:, to_dec, :],
+#                     scale[:, to_dec, :],
+#                     prob[:, to_dec, :],
+#                 )
+
+#             mean_adj = mean.reshape(B, -1)   # [N, 50]
+#             scale_adj = scale.reshape(B, -1) # [N, 50]
+#             prob_adj = prob.reshape(B, -1)   # [N, 50]
+
+#             return mean_adj, scale_adj, prob_adj
+
+
 
 class Channel_CTX_fea_tiny(nn.Module):
     def __init__(self):
@@ -254,6 +652,9 @@ class GaussianModel(nn.Module):
                  use_2D: bool=True,
                  decoded_version: bool=False,
                  is_synthetic_nerf: bool=False,
+                 use_gated_mlp: bool=False,
+                 use_spatial_context: bool=False,
+                 use_joint_context: bool=False,
                  ):
         super().__init__()
         print('hash_params:', use_2D, n_features_per_level,
@@ -281,6 +682,8 @@ class GaussianModel(nn.Module):
         self.Q = Q
         self.use_2D = use_2D
         self.decoded_version = decoded_version
+        self.use_spatial_context = use_spatial_context
+        self.use_joint_context = use_joint_context
 
         self._anchor = torch.empty(0)
         self._offset = torch.empty(0)
@@ -365,7 +768,7 @@ class GaussianModel(nn.Module):
             nn.Linear(feat_dim, 3*self.n_offsets),
             nn.Sigmoid()
         ).cuda()
-
+        # ここでガウス分布パラメータを予測
         self.mlp_grid = nn.Sequential(
             nn.Linear(self.encoding_xyz.output_dim, feat_dim*2),
             nn.ReLU(True),
@@ -373,7 +776,9 @@ class GaussianModel(nn.Module):
         ).cuda()
 
         if not is_synthetic_nerf:
-            self.mlp_deform = Channel_CTX_fea().cuda()
+            self.mlp_deform = Channel_CTX_fea(use_gated=use_gated_mlp).cuda()
+            if use_gated_mlp:
+                print('Using Gated MLP for Channel Context')
         else:
             print('find synthetic nerf, use Channel_CTX_fea_tiny')
             self.mlp_deform = Channel_CTX_fea_tiny().cuda()
@@ -381,6 +786,26 @@ class GaussianModel(nn.Module):
         self.entropy_gaussian = Entropy_gaussian(Q=1).cuda()
         self.EG_mix_prob_2 = Entropy_gaussian_mix_prob_2(Q=1).cuda()
 
+        # 空間コンテキストモジュールの初期化
+        if self.use_spatial_context:
+            self.spatial_context_module = SpatialContextModule(
+                k_neighbors=16,
+                feat_dim=self.encoding_xyz.output_dim
+            ).cuda()
+            print('Using Spatial Context Module for hash features')
+
+        # ジョイントコンテキストモジュールの初期化
+        print("ジョイントコンテキスト起動してくれ")
+        if self.use_joint_context:
+            # # Use the actual output dimension from encoding_xyz
+            # encoding_output_dim = self.encoding_xyz.output_dim
+            # self.joint_context_module = JointContextModule(encoding_output_dim).cuda()
+            # print(f'Using Joint Context Module for joint features (dim={encoding_output_dim})')
+            # Use the actual output dimension from encoding_xyz
+            encoding_output_dim = self.encoding_xyz.output_dim
+            self.joint_context_module = JointPointNetModule(encoding_output_dim).cuda()
+            print(f'PointNetモジュール使用中(dim={encoding_output_dim})')
+        print("ジョイントコンテキスト起動してくれた?")
     def get_encoding_params(self):
         params = []
         if self.use_2D:
@@ -526,8 +951,31 @@ class GaussianModel(nn.Module):
         # x: [N, 3]
         assert len(x.shape) == 2 and x.shape[1] == 3
         assert torch.abs(self.x_bound_min - torch.zeros(size=[1, 3], device='cuda')).mean() > 0
+
+        # 正規化前のアンカー座標を保存（空間コンテキスト用）
+        x_orig = x.clone()  # if self.use_spatial_context else None
+
         x = (x - self.x_bound_min) / (self.x_bound_max - self.x_bound_min)  # to [0, 1]
         features = self.encoding_xyz(x)  # [N, 4*12]
+
+        # 空間コンテキストモジュールを適用
+        if self.use_spatial_context:
+            features = self.spatial_context_module(x_orig, features)
+        
+        # Jointモデルの自己回帰モジュール適用
+        # アンカー座標に対してContextPredictionを適用するイメージ 
+        '''
+        class ContextPrediction(nn.Module):
+            def __init__(self, dim_in):
+                super(ContextPrediction, self).__init__()
+                self.masked = MaskedConv2d("A", in_channels=dim_in, out_channels=384, kernel_size=5, stride=1, padding=2)
+            
+            def forward(self, x):
+                return self.masked(x)
+        '''
+        if self.use_joint_context:
+            features = self.joint_context_module(x_orig, features)
+        
         return features
 
     @property
@@ -600,11 +1048,16 @@ class GaussianModel(nn.Module):
         self.offset_denom = torch.zeros((self.get_anchor.shape[0]*self.n_offsets, 1), device="cuda")
         self.anchor_demon = torch.zeros((self.get_anchor.shape[0], 1), device="cuda")
 
+        # マスクの学習率を決定（freeze_maskがTrueの場合は0に設定）
+        mask_lr = 0.0 if training_args.freeze_mask else training_args.mask_lr_init * self.spatial_lr_scale
+        if training_args.freeze_mask:
+            print("Mask learning is FROZEN (learning rate = 0.0)")
+
         if self.use_feat_bank:
             l = [
                 {'params': [self._anchor], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "anchor"},
                 {'params': [self._offset], 'lr': training_args.offset_lr_init * self.spatial_lr_scale, "name": "offset"},
-                {'params': [self._mask], 'lr': training_args.mask_lr_init * self.spatial_lr_scale, "name": "mask"},
+                {'params': [self._mask], 'lr': mask_lr, "name": "mask"},
                 {'params': [self._anchor_feat], 'lr': training_args.feature_lr, "name": "anchor_feat"},
                 {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
                 {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
@@ -623,7 +1076,7 @@ class GaussianModel(nn.Module):
             l = [
                 {'params': [self._anchor], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "anchor"},
                 {'params': [self._offset], 'lr': training_args.offset_lr_init * self.spatial_lr_scale, "name": "offset"},
-                {'params': [self._mask], 'lr': training_args.mask_lr_init * self.spatial_lr_scale, "name": "mask"},
+                {'params': [self._mask], 'lr': mask_lr, "name": "mask"},
                 {'params': [self._anchor_feat], 'lr': training_args.feature_lr, "name": "anchor_feat"},
                 {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
                 {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
@@ -647,10 +1100,14 @@ class GaussianModel(nn.Module):
                                                     lr_final=training_args.offset_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.offset_lr_delay_mult,
                                                     max_steps=training_args.offset_lr_max_steps)
-        self.mask_scheduler_args = get_expon_lr_func(lr_init=training_args.mask_lr_init*self.spatial_lr_scale,
-                                                    lr_final=training_args.mask_lr_final*self.spatial_lr_scale,
-                                                    lr_delay_mult=training_args.mask_lr_delay_mult,
-                                                    max_steps=training_args.mask_lr_max_steps)
+        # マスクスケジューラー（freeze_maskがTrueの場合は常に0を返す）
+        if training_args.freeze_mask:
+            self.mask_scheduler_args = lambda x: 0.0
+        else:
+            self.mask_scheduler_args = get_expon_lr_func(lr_init=training_args.mask_lr_init*self.spatial_lr_scale,
+                                                        lr_final=training_args.mask_lr_final*self.spatial_lr_scale,
+                                                        lr_delay_mult=training_args.mask_lr_delay_mult,
+                                                        max_steps=training_args.mask_lr_max_steps)
 
         self.mlp_opacity_scheduler_args = get_expon_lr_func(lr_init=training_args.mlp_opacity_lr_init,
                                                     lr_final=training_args.mlp_opacity_lr_final,
@@ -1126,11 +1583,263 @@ class GaussianModel(nn.Module):
             x = x / 4 + 0.5  # [-inf, inf] is at [0, 1]
             return x
 
+    def build_level2_from_level1(self, voxel_size_L2: float):
+        """
+        Level1アンカー群からLevel2アンカーを生成する（モーメントマッチング）
+
+        Level1の各アンカーを3Dガウシアンとみなし、voxel_size_L2でグループ化。
+        各グループをガウシアン混合として扱い、モーメントマッチングで
+        1つのガウシアンに近似してLevel2アンカーを生成する。
+
+        Args:
+            voxel_size_L2 (float): Level2のボクセルサイズ
+
+        Returns:
+            tuple: (anchor_L2, scaling_L2, rotation_L2, feat_L2, offset_L2, mask_L2)
+                anchor_L2:   [N2, 3]      Level2アンカー位置
+                scaling_L2:  [N2, 6]      Level2スケーリング（log space）
+                rotation_L2: [N2, 4]      Level2回転（quaternion）
+                feat_L2:     [N2, feat_dim] Level2特徴
+                offset_L2:   [N2, n_offsets, 3] Level2オフセット
+                mask_L2:     [N2, n_offsets+1, 1] Level2マスク
+        """
+        device = self.get_anchor.device
+
+        # Level1のアンカー情報を取得
+        anchors_L1 = self.get_anchor  # [N1, 3]
+        scaling_L1 = self.get_scaling  # [N1, 6]
+        rotation_L1 = self.get_rotation  # [N1, 4]
+        feat_L1 = self._anchor_feat  # [N1, feat_dim]
+
+        N1 = anchors_L1.shape[0]
+
+        if N1 == 0:
+            # 空の場合は空のテンソルを返す
+            empty_anchor = torch.empty(0, 3, device=device)
+            empty_scaling = torch.empty(0, 6, device=device)
+            empty_rotation = torch.empty(0, 4, device=device)
+            empty_feat = torch.empty(0, self.feat_dim, device=device)
+            empty_offset = torch.empty(0, self.n_offsets, 3, device=device)
+            empty_mask = torch.empty(0, self.n_offsets + 1, 1, device=device)
+            return empty_anchor, empty_scaling, empty_rotation, empty_feat, empty_offset, empty_mask
+
+        # 1. Level1 → Level2 のグルーピング
+        # ボクセルグリッド座標を計算
+        grid_L2 = torch.round(anchors_L1 / voxel_size_L2).long()  # [N1, 3]
+
+        # ユニークなセルとインデックスを取得
+        # unique は連続したメモリを要求するため、contiguous() を呼ぶ
+        grid_L2_flat = grid_L2[:, 0] * 1000000 + grid_L2[:, 1] * 1000 + grid_L2[:, 2]  # [N1]
+        unique_cells, inverse_idx = torch.unique(grid_L2_flat, return_inverse=True)  # unique_cells: [N2], inverse_idx: [N1]
+
+        N2 = unique_cells.shape[0]
+
+        # 2. 各グループcについてモーメントマッチング
+        anchor_L2_list = []
+        scaling_L2_list = []
+        rotation_L2_list = []
+        feat_L2_list = []
+
+        for c in range(N2):
+            # グループcに属するLevel1アンカーのマスク
+            idx_c = (inverse_idx == c)  # [N1] bool
+
+            # グループ内のアンカー
+            a_i = anchors_L1[idx_c]  # [M, 3]
+            sc_i = scaling_L1[idx_c]  # [M, 6]
+            rt_i = rotation_L1[idx_c]  # [M, 4]
+            f_i = feat_L1[idx_c]  # [M, feat_dim]
+
+            M = a_i.shape[0]
+
+            # 重み（全て1）
+            w = torch.ones(M, device=device)  # [M]
+            w_sum = w.sum()
+
+            # 新しい平均（Level2アンカー位置）
+            mu_L2 = (w[:, None] * a_i).sum(dim=0) / w_sum  # [3]
+
+            # 各Level1アンカーの共分散行列を計算
+            # self.covariance_activation は build_covariance_from_scaling_rotation
+            # scaling: [M, 6], rotation: [M, 4] -> covariance: [M, 3, 3] (対称行列の6要素表現)
+            # strip_symmetric で [M, 6] になっている可能性があるので、完全な [M, 3, 3] に戻す
+
+            # build_scaling_rotation を使って L @ L^T を計算
+            from utils.general_utils import build_scaling_rotation
+
+            # scaling_activation で exp を適用（既に get_scaling で適用済み）
+            # sc_i は既に exp 済み
+            L_i = build_scaling_rotation(sc_i, rt_i)  # [M, 3, 3]
+            Sigma_i = L_i @ L_i.transpose(1, 2)  # [M, 3, 3]
+
+            # 新しい共分散（Level2共分散）
+            # Σ_L2 = Σ_i w_i (Σ_i + (μ_i - μ_L2)(μ_i - μ_L2)^T) / Σ_i w_i
+            diff = a_i - mu_L2.unsqueeze(0)  # [M, 3]
+            outer = diff.unsqueeze(2) @ diff.unsqueeze(1)  # [M, 3, 3]
+
+            Sigma_L2 = (w[:, None, None] * (Sigma_i + outer)).sum(dim=0) / w_sum  # [3, 3]
+
+            # 3. 共分散 → (scaling, rotation) への変換
+            # 固有値分解
+            eigvals, eigvecs = torch.linalg.eigh(Sigma_L2)  # eigvals: [3], eigvecs: [3, 3]
+
+            # 固有値をクランプ（数値安定性）
+            eigvals = torch.clamp(eigvals, min=1e-6)
+
+            # スケール = sqrt(固有値)
+            scales = torch.sqrt(eigvals)  # [3]
+
+            # 回転行列 → クォータニオン
+            R = eigvecs  # [3, 3]
+            quat = self._rotation_matrix_to_quaternion(R)  # [4]
+
+            # scaling ベクトルは 6次元
+            # 最初の3次元: log(scales), 残り3次元: 0
+            log_scales = torch.log(scales)  # [3]
+            scaling_vec = torch.cat([log_scales, torch.zeros(3, device=device)], dim=0)  # [6]
+
+            # Level2の特徴：重み付き平均
+            feat_L2 = (w[:, None] * f_i).sum(dim=0) / w_sum  # [feat_dim]
+
+            # リストに追加
+            anchor_L2_list.append(mu_L2)
+            scaling_L2_list.append(scaling_vec)
+            rotation_L2_list.append(quat)
+            feat_L2_list.append(feat_L2)
+
+        # スタック
+        anchor_L2 = torch.stack(anchor_L2_list, dim=0)  # [N2, 3]
+        scaling_L2 = torch.stack(scaling_L2_list, dim=0)  # [N2, 6]
+        rotation_L2 = torch.stack(rotation_L2_list, dim=0)  # [N2, 4]
+        feat_L2 = torch.stack(feat_L2_list, dim=0)  # [N2, feat_dim]
+
+        # 4. Level2の offset / mask の初期化
+        # offset: 全てゼロ
+        offset_L2 = torch.zeros((N2, self.n_offsets, 3), device=device)  # [N2, n_offsets, 3]
+
+        # mask: 全て1
+        mask_L2 = torch.ones((N2, self.n_offsets + 1, 1), device=device)  # [N2, n_offsets+1, 1]
+
+        return anchor_L2, scaling_L2, rotation_L2, feat_L2, offset_L2, mask_L2
+
+    def _rotation_matrix_to_quaternion(self, R: torch.Tensor) -> torch.Tensor:
+        """
+        3x3回転行列をクォータニオン [w, x, y, z] に変換
+
+        Args:
+            R: [3, 3] 回転行列
+
+        Returns:
+            [4] クォータニオン（正規化済み）
+        """
+        # Shepperdのアルゴリズムを使用
+        # https://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
+
+        trace = R[0, 0] + R[1, 1] + R[2, 2]
+
+        if trace > 0:
+            s = 0.5 / torch.sqrt(trace + 1.0)
+            w = 0.25 / s
+            x = (R[2, 1] - R[1, 2]) * s
+            y = (R[0, 2] - R[2, 0]) * s
+            z = (R[1, 0] - R[0, 1]) * s
+        elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = 2.0 * torch.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+            w = (R[2, 1] - R[1, 2]) / s
+            x = 0.25 * s
+            y = (R[0, 1] + R[1, 0]) / s
+            z = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = 2.0 * torch.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+            w = (R[0, 2] - R[2, 0]) / s
+            x = (R[0, 1] + R[1, 0]) / s
+            y = 0.25 * s
+            z = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = 2.0 * torch.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+            w = (R[1, 0] - R[0, 1]) / s
+            x = (R[0, 2] + R[2, 0]) / s
+            y = (R[1, 2] + R[2, 1]) / s
+            z = 0.25 * s
+
+        quat = torch.stack([w, x, y, z], dim=0)
+
+        # 正規化
+        quat = quat / torch.norm(quat)
+
+        return quat
+
+    @torch.no_grad()
+    def compute_total_bits(self):
+        """
+        全anchorを使って正確なビット数を計算する
+        Returns:
+            (bit_feat, bit_scaling, bit_offsets): 各パラメータの総ビット数
+        """
+        # AQM設定用のパラメータ
+        Q_feat = 1
+        Q_scaling = 0.1
+        Q_offsets = 0.2
+
+        mask_anchor = self.get_mask_anchor.to(torch.bool)[:, 0]  # N
+
+        _anchor = self.get_anchor[mask_anchor]
+        _feat = self._anchor_feat[mask_anchor]
+        _grid_offsets = self._offset[mask_anchor]
+        _scaling = self.get_scaling[mask_anchor]
+        _mask = self.get_mask[mask_anchor]
+
+        feat_context = self.calc_interp_feat(_anchor)
+        mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+            torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+
+        # conduct_encoding()と同じようにチャネルごとのQを使う
+        Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])  # [N, 50]
+        Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)  # [N*6]
+        Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)  # [N*30]
+        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))  # [N, 50]
+        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))  # [N*6]
+        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))  # [N*30]
+        _feat = (STE_multistep.apply(_feat, Q_feat)).detach()
+        mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
+        probs = torch.stack([prob, prob_adj], dim=-1)
+        probs = torch.softmax(probs, dim=-1)
+
+        # conduct_encoding()と同じ形状にする
+        mean_scaling = mean_scaling.contiguous().view(-1)
+        scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+        mean_offsets = mean_offsets.contiguous().view(-1)
+        scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+        scale = torch.clamp(scale, min=1e-9)
+
+        grid_scaling = (STE_multistep.apply(_scaling.view(-1), Q_scaling)).detach()
+        offsets = (STE_multistep.apply(_grid_offsets.view(-1, 3*self.n_offsets).view(-1), Q_offsets)).detach()
+        mask_tmp = _mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1)
+
+        bit_feat = self.EG_mix_prob_2.forward(_feat,
+                                            mean, mean_adj,
+                                            scale, scale_adj,
+                                            probs[..., 0], probs[..., 1],
+                                            Q=Q_feat)
+
+        bit_scaling = self.entropy_gaussian.forward(grid_scaling, mean_scaling, scale_scaling, Q_scaling)
+        bit_offsets = self.entropy_gaussian.forward(offsets, mean_offsets, scale_offsets, Q_offsets)
+        bit_offsets = bit_offsets * mask_tmp
+
+        bit_feat_total = torch.sum(bit_feat).item()
+        bit_scaling_total = torch.sum(bit_scaling).item()
+        bit_offsets_total = torch.sum(bit_offsets).item()
+
+        return bit_feat_total, bit_scaling_total, bit_offsets_total
+
     @torch.no_grad()
     def estimate_final_bits(self):
 
+        # AQM設定用のパラメータ
+        # 明らかにスケーリングのみ値が高い
         Q_feat = 1
-        Q_scaling = 0.001
+        # Q_scaling = 0.001
+        Q_scaling = 0.1
         Q_offsets = 0.2
 
         mask_anchor = self.get_mask_anchor.to(torch.bool)[:, 0]  # N
@@ -1145,18 +1854,30 @@ class GaussianModel(nn.Module):
         feat_context = self.calc_interp_feat(_anchor)  # [N_visible_anchor*0.2, 32]
         mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
             torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)  # [N_visible_anchor, 32], [N_visible_anchor, 32]
-        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
-        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
+
+        # conduct_encoding()と同じようにチャネルごとのQを使う
+        Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])  # [N, 50]
+        Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)  # [N*6]
+        Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)  # [N*30]
+        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))  # [N, 50]
+        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))  # [N*6]
+        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))  # [N*30]
         _feat = (STE_multistep.apply(_feat, Q_feat)).detach()
+        # mean_adj, scale_adj, prob_adj, gate = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
         mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
         probs = torch.stack([prob, prob_adj], dim=-1)
         probs = torch.softmax(probs, dim=-1)
 
-        grid_scaling = (STE_multistep.apply(_scaling, Q_scaling)).detach()
-        offsets = (STE_multistep.apply(_grid_offsets, Q_offsets.unsqueeze(1))).detach()
-        offsets = offsets.view(-1, 3*self.n_offsets)
-        mask_tmp = _mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets)
+        # conduct_encoding()と同じ形状にする
+        mean_scaling = mean_scaling.contiguous().view(-1)
+        scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+        mean_offsets = mean_offsets.contiguous().view(-1)
+        scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+        scale = torch.clamp(scale, min=1e-9)
+
+        grid_scaling = (STE_multistep.apply(_scaling.view(-1), Q_scaling)).detach()
+        offsets = (STE_multistep.apply(_grid_offsets.view(-1, 3*self.n_offsets).view(-1), Q_offsets)).detach()
+        mask_tmp = _mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1)
 
         bit_feat = self.EG_mix_prob_2.forward(_feat,
                                             mean, mean_adj,
@@ -1246,6 +1967,7 @@ class GaussianModel(nn.Module):
         hash_b_name = os.path.join(pre_path_name, 'hash.b')
         masks_b_name = os.path.join(pre_path_name, 'masks.b')
 
+        # データをbatch_sizeごとに分割し、処理
         for s in range(steps):
             N_start = s * MAX_batch_size
             N_end = min((s+1)*MAX_batch_size, N)
@@ -1254,62 +1976,184 @@ class GaussianModel(nn.Module):
             scaling_b_name = os.path.join(pre_path_name, 'scaling.b').replace('.b', f'_{s}.b')
             offsets_b_name = os.path.join(pre_path_name, 'offsets.b').replace('.b', f'_{s}.b')
 
+            # AQM用の初期パラメータ
             Q_feat = 1
-            Q_scaling = 0.001
+            # Q_scaling = 0.001
+            Q_scaling = 0.1
             Q_offsets = 0.2
 
+            # 現在のステップに応じたアンカーを切り出し
             anchor_slice = _anchor[N_start:N_end]
 
             # encode feat
+            # features = self.spatial_context_module(x_orig, features)を適用
+            # ここでハッシュエンコーディングも適用される
+            '''
+            calc_interp_feat(anchor_slice)の流れ
+            1. 元座標を保存
+            2. 座標の正規化
+            3. ハッシュエンコーディング(GridEncoderまたは,mix_3D2D_encoding)を適用し、3D座標から特徴量を取得
+                3.1 空間コンテキストをspatial_context_moduleで計算し特徴量に統合
+            4. 取得した特徴量を返す
+            
+
+            mix_3D2D_encoding(
+                n_features,
+                resolution_list,
+                log2_hashmap_size,
+                resolution_list_2D,
+                log2_hashmap_size_2D,
+                ste_binary,
+                ste_multiscale,
+                add_noise,
+                Q,
+            )の流れ
+            前提として、GridEncordingを複数使用している
+            2Dを使用する場合、2D平面に投影して取得される特徴量も獲得する
+            xyz, xy, yz, zxの4種類のGridEncodingを使用し、各特徴量を結合して最終的な特徴量を生成する
+            xyzは2*16、xy,yz,zxは2*8の特徴量を生成する
+
+            GridEncorder(
+                num_dim,(2D or 3D)
+                n_features, (各レベルの特徴次元数)
+                resolution_list, (ハッシュグリッド解像度リスト)
+                log2_hashmap_size, (最大ハッシュテーブルサイズのlog2)
+            )
+            グリッドエンコーディングとは、連続座標を高次元の特徴ベクトルe(x)に移す写像
+
+            1. ハッシュテーブルを構築
+                低解像度レベル: 全グリッド点を保存
+                高解像度レベル: ハッシュ衝突を許容（メモリ節約）
+                例（3Dの場合）:
+                    レベル	解像度	理想数 (res³)	実際数 (min)	オフセット(全レベルの合計パラメータ)
+                    0	18	5,832	5,832	0
+                    1	24	13,824	13,824	5,832
+                    2	33	35,937	35,944	19,656
+                    ...	...	...	...	...
+                    9	275	20,796,875	524,288	...
+                    10	376	53,157,376	524,288	...
+                    11	514	135,796,744	524,288	...
+            2. 
+
+
+            '''
+
             feat_context = self.calc_interp_feat(anchor_slice)  # [N_num, ?]
+
             # many [N_num, ?]
+            # 1つのMLPで全てのガウシアンパラメータの分布（平均・スケール）と量子化パラメータを一度に予測
+            # ここがHash Assisted Context
             mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
                 torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
+            # 調整パラメータの次元合わせ
             Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
             Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
             Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+            
+            # 統計パラメータの整形(スケーリングとオフセットの平均、分散を取得)
             mean_scaling = mean_scaling.contiguous().view(-1)
             mean_offsets = mean_offsets.contiguous().view(-1)
             scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
             scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+            
+            # 適応的な調整の適用
             Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
             Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
             Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
 
+            # 特徴量の抽出
             feat = _feat[N_start:N_end]
+            # 特徴量をSTEで量子化
+                # STEとはStraight-Through Estimatorの略で、量子化などの非微分可能な操作を微分可能に近似する手法
             feat = STE_multistep.apply(feat, Q_feat, self._anchor_feat.mean())
             torch.cuda.synchronize(); t0 = time.time()
 
             t_feature_0 = get_time()
+            # 特徴量の平均、分散、確率・重みを結合
             mean_scale = torch.cat([mean, scale, prob], dim=-1)
             scale = torch.clamp(scale, min=1e-9)
             bit_feat = 0
-            for cc in range(5):
+
+            # use_gated_mlp に応じて分割数とチャネルサイズを変更
+            if self.mlp_deform.use_gated:
+                num_chunks = 10  # 10分割
+                chunk_size = 5   # 各5次元
+            else:
+                num_chunks = 5   # 5分割
+                chunk_size = 10  # 各10次元
+
+            # チャンクごとにループ
+            # ここからIntra-Anchor Context
+            for cc in range(num_chunks):
+                # mean_adj, scale_adj, prob_adj, gate = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
+                # 調整パラメータを予測
                 mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
-                probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
+                # HAC予測の確率とIntra-Anchorの確率を結合
+                # 重みの計算
+                probs = torch.stack([prob[:, cc*chunk_size:cc*chunk_size+chunk_size], prob_adj], dim=-1)
                 probs = torch.softmax(probs, dim=-1)
 
-                feat_tmp = feat[:, cc*10:cc*10+10].contiguous().view(-1)
-                Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                # チャンクごとの特徴量と量子化パラメータを取得
+                feat_tmp = feat[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1)
+                Q_feat_tmp = Q_feat[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1)
 
+                # Gaussian Mixtureを実行
+                '''
+                encoder_gaussian_mixed_chunk(
+                    x, 
+                    mean_list,  
+                    scale_list, 
+                    probs_list, 
+                    Q, 
+                    file_name, 
+                    chunk_size
+                )
+                の流れ
+                1. xをQを使用して量子化
+                2. ガウス分布N(mean, scale)とN(mean_adj, scale_adj)のCDF(累積分布関数)を計算
+                3. xを正規化
+                4. xとCDFを使用し算術符号化(AE)を実行
+                5. file_nameにビット列を保存
+                6. ビット数を返す
+                '''
                 bit_feat += encoder_gaussian_mixed_chunk(
                     feat_tmp,
-                    [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                    [scale[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
+                    [mean[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), mean_adj.contiguous().view(-1)],
+                    [scale[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), scale_adj.contiguous().view(-1)],
                     [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
                     Q_feat_tmp,
                     file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
             t_feature += get_time() - t_feature_0
 
+            # GPU同期と時間計測、ビット数取得
             torch.cuda.synchronize(); t_codec += time.time() - t0
             bit_feat_list.append(bit_feat)
 
+
             t_scaling_0 = get_time()
+            # スケーリングの抽出と量子化
             scaling = _scaling[N_start:N_end].view(-1)  # [N_num*6]
             scaling = STE_multistep.apply(scaling, Q_scaling, self.get_scaling.mean())
             torch.cuda.synchronize(); t0 = time.time()
-            bit_scaling = encoder_gaussian_chunk(scaling, mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
+            # スケーリングを単一ガウス分布でエンコード
+            '''
+            encoder_gaussian_chunk(x, mean, scale, Q, file_name, chunk_size)の流れ
+            1. xとQを使用し量子化
+            2. ガウス分布N(mean, scale)のCDF(累積分布関数)を計算
+            3. xを正規化
+            4. xとCDFを使用し算術符号化(AE)を実行
+            5. file_nameにビット列を保存
+            6. ビット数を返す
+            '''
+            bit_scaling = encoder_gaussian_chunk(
+                scaling, 
+                mean_scaling, 
+                scale_scaling, 
+                Q_scaling, 
+                file_name=scaling_b_name, 
+                chunk_size=10_0000
+            )
             torch.cuda.synchronize(); t_codec += time.time() - t0
             bit_scaling_list.append(bit_scaling)
             t_scaling += get_time() - t_scaling_0
@@ -1317,11 +2161,19 @@ class GaussianModel(nn.Module):
             t_offset_0 = get_time()
             mask = _mask[N_start:N_end]  # {0, 1}  # [N_num, K, 1]
             mask = mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1).to(torch.bool)  # [N_num*K*3]
+            # オフセットの抽出と量子化
             offsets = _grid_offsets[N_start:N_end].view(-1, 3*self.n_offsets).view(-1)  # [N_num*K*3]
             offsets = STE_multistep.apply(offsets, Q_offsets, self._offset.mean())
             offsets[~mask] = 0.0
             torch.cuda.synchronize(); t0 = time.time()
-            bit_offsets = encoder_gaussian_chunk(offsets[mask], mean_offsets[mask], scale_offsets[mask], Q_offsets[mask], file_name=offsets_b_name, chunk_size=10_0000)
+            bit_offsets = encoder_gaussian_chunk(
+                offsets[mask], 
+                mean_offsets[mask], 
+                scale_offsets[mask], 
+                Q_offsets[mask], 
+                file_name=offsets_b_name, 
+                chunk_size=10_0000
+            )
             torch.cuda.synchronize(); t_codec += time.time() - t0
             bit_offsets_list.append(bit_offsets)
             t_offset += get_time() - t_offset_0
@@ -1437,13 +2289,15 @@ class GaussianModel(nn.Module):
             offsets_b_name = os.path.join(pre_path_name, 'offsets.b').replace('.b', f'_{s}.b')
 
             Q_feat = 1
-            Q_scaling = 0.001
+            # Q_scaling = 0.001
+            Q_scaling = 0.1
             Q_offsets = 0.2
 
             # encode feat
             anchor_sort = anchor_decoded[N_start:N_end]
             feat_context = self.calc_interp_feat(anchor_sort)  # [N_num, ?]
             # many [N_num, ?]
+            
             mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
                 torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
@@ -1464,21 +2318,31 @@ class GaussianModel(nn.Module):
             feat_decoded = torch.zeros(size=[N_num, self.feat_dim], device='cuda', dtype=torch.float32)
             mean_scale = torch.cat([mean, scale, prob], dim=-1)
             scale = torch.clamp(scale, min=1e-9)
-            for cc in range(5):
+
+            # use_gated_mlp に応じて分割数とチャネルサイズを変更
+            if self.mlp_deform.use_gated:
+                num_chunks = 10  # 10分割
+                chunk_size = 5   # 各5次元
+            else:
+                num_chunks = 5   # 5分割
+                chunk_size = 10  # 各10次元
+
+            for cc in range(num_chunks):
+                # mean_adj, scale_adj, prob_adj, gate = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
                 mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
-                probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
+                probs = torch.stack([prob[:, cc*chunk_size:cc*chunk_size+chunk_size], prob_adj], dim=-1)
                 probs = torch.softmax(probs, dim=-1)
-                Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                Q_feat_tmp = Q_feat[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1)
 
                 feat_decoded_tmp = decoder_gaussian_mixed_chunk(
-                    [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                    [scale[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
+                    [mean[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), mean_adj.contiguous().view(-1)],
+                    [scale[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), scale_adj.contiguous().view(-1)],
                     [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
                     Q_feat_tmp,
                     file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
 
-                feat_decoded_tmp = feat_decoded_tmp.view(N_num, 10)
-                feat_decoded[:, cc*10:cc*10+10] = feat_decoded_tmp
+                feat_decoded_tmp = feat_decoded_tmp.view(N_num, chunk_size)
+                feat_decoded[:, cc*chunk_size:cc*chunk_size+chunk_size] = feat_decoded_tmp
             feat_decoded_list.append(feat_decoded)
             t_feature += get_time() - t_feature_0
 
