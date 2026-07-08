@@ -1,6 +1,6 @@
 # [ARXIV'25] HAC++
-Official Pytorch implementation of **HAC++: Towards 100X Compression of 3D Gaussian Splatting**.
-## HAC++ is an enhanced compression method over [HAC](https://github.com/yihangchen-ee/hac/)!
+**HAC++: Towards 100X Compression of 3D Gaussian Splatting** の公式PyTorch実装です。
+## HAC++は[HAC](https://github.com/yihangchen-ee/hac/)を発展させた圧縮手法です！
 
 [Yihang Chen](https://yihangchen-ee.github.io), 
 [Qianyi Wu](https://qianyiwu.github.io), 
@@ -10,31 +10,31 @@ Official Pytorch implementation of **HAC++: Towards 100X Compression of 3D Gauss
 
 [[`Arxiv`](https://arxiv.org/pdf/2501.12255)] [[`Project`](https://yihangchen-ee.github.io/project_hac++/)] [[`Github`](https://github.com/YihangChen-ee/HAC-plus)]
 
-## Links
-You are welcomed to check a series of works from our group on 3D radiance field representation compression as listed below:
-- 🎉 [CNC](https://github.com/yihangchen-ee/cnc/) [CVPR'24]: efficient NeRF compression! [[`Paper`](https://openaccess.thecvf.com/content/CVPR2024/papers/Chen_How_Far_Can_We_Compress_Instant-NGP-Based_NeRF_CVPR_2024_paper.pdf)] [[`Arxiv`](https://arxiv.org/pdf/2406.04101)] [[`Project`](https://yihangchen-ee.github.io/project_cnc/)]
-- 🏠 [HAC](https://github.com/yihangchen-ee/hac/) [ECCV'24]: efficient 3DGS compression! [[`Paper`](https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/01178.pdf)] [[`Arxiv`](https://arxiv.org/pdf/2403.14530)] [[`Project`](https://yihangchen-ee.github.io/project_hac/)]
-- 💪 [HAC++](https://github.com/yihangchen-ee/hac-plus/) [ARXIV'25]: an enhanced compression method over HAC! [[`Arxiv`](https://arxiv.org/pdf/2501.12255)] [[`Project`](https://yihangchen-ee.github.io/project_hac++/)]
-- 🚀 [FCGS](https://github.com/yihangchen-ee/fcgs/) [ICLR'25]: fast optimization-free 3DGS compression! [[`Paper`](https://openreview.net/pdf?id=DCandSZ2F1)] [[`Arxiv`](https://arxiv.org/pdf/2410.08017)] [[`Project`](https://yihangchen-ee.github.io/project_fcgs/)]
-- 🪜 [PCGS](https://github.com/yihangchen-ee/pcgs/) [AAAI'26, Oral]: progressive 3DGS compression! [[`Arxiv`](https://arxiv.org/pdf/2503.08511)] [[`Project`](https://yihangchen-ee.github.io/project_pcgs/)]
+## 関連リンク
+3Dラディアンスフィールド表現の圧縮に関する、著者らのグループによる一連の研究も是非ご覧ください:
+- 🎉 [CNC](https://github.com/yihangchen-ee/cnc/) [CVPR'24]: 高効率なNeRF圧縮！ [[`Paper`](https://openaccess.thecvf.com/content/CVPR2024/papers/Chen_How_Far_Can_We_Compress_Instant-NGP-Based_NeRF_CVPR_2024_paper.pdf)] [[`Arxiv`](https://arxiv.org/pdf/2406.04101)] [[`Project`](https://yihangchen-ee.github.io/project_cnc/)]
+- 🏠 [HAC](https://github.com/yihangchen-ee/hac/) [ECCV'24]: 高効率な3DGS圧縮！ [[`Paper`](https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/01178.pdf)] [[`Arxiv`](https://arxiv.org/pdf/2403.14530)] [[`Project`](https://yihangchen-ee.github.io/project_hac/)]
+- 💪 [HAC++](https://github.com/yihangchen-ee/hac-plus/) [ARXIV'25]: HACをさらに発展させた圧縮手法！ [[`Arxiv`](https://arxiv.org/pdf/2501.12255)] [[`Project`](https://yihangchen-ee.github.io/project_hac++/)]
+- 🚀 [FCGS](https://github.com/yihangchen-ee/fcgs/) [ICLR'25]: 最適化不要の高速3DGS圧縮！ [[`Paper`](https://openreview.net/pdf?id=DCandSZ2F1)] [[`Arxiv`](https://arxiv.org/pdf/2410.08017)] [[`Project`](https://yihangchen-ee.github.io/project_fcgs/)]
+- 🪜 [PCGS](https://github.com/yihangchen-ee/pcgs/) [AAAI'26, Oral]: プログレッシブな3DGS圧縮！ [[`Arxiv`](https://arxiv.org/pdf/2503.08511)] [[`Project`](https://yihangchen-ee.github.io/project_pcgs/)]
 
-## Updates
-🔥Jan-2025: HAC++ is now released an enhanced compression method over [HAC](https://github.com/yihangchen-ee/hac/)!
+## 更新履歴
+🔥2025年1月: HAC++を公開しました。[HAC](https://github.com/yihangchen-ee/hac/)を発展させた圧縮手法です！
 
-## Overview
+## 概要
 <p align="left">
 <img src="assets/teaser.png" width=80% height=80% 
 class="center">
 </p>
 
-HAC++ leverages the relationships between unorganized anchors and a structured hash grid, utilizing their mutual information for context modeling. 
-Additionally, HAC++ exploits contextual relationships within anchors to further enhance compression performance. 
-To facilitate entropy coding, we utilize Gaussian distributions to precisely estimate the probability of each quantized attribute, 
-where an adaptive quantization module is proposed to enable high-precision quantization of these attributes for improved fidelity restoration. 
-Moreover, we incorporate an adaptive masking strategy to eliminate invalid Gaussians and anchors.
-Overall, HAC++ achieves a remarkable size reduction of over $100\times$ compared to vanilla 3DGS when averaged on all datasets, while simultaneously improving fidelity.
+HAC++は、無秩序なアンカーと構造化されたハッシュグリッドの関係性を活用し、両者の相互情報量をコンテキストモデリングに利用します。
+さらに、アンカー内のコンテキスト関係性も活用することで圧縮性能をさらに向上させています。
+エントロピー符号化のために、各量子化属性の確率を精密に推定するガウス分布を利用しており、
+これらの属性を高精度に量子化して忠実度の高い復元を可能にする適応的量子化モジュールを提案しています。
+さらに、無効なGaussianおよびアンカーを除去する適応的マスキング戦略も組み込んでいます。
+全体として、HAC++はvanilla 3DGSと比較して全データセット平均で$100\times$を超える驚異的なサイズ削減を達成し、同時に忠実度も向上させています。
 
-## Performance
+## 性能
 <p align="left">
 <img src="assets/main_performance.png" width=80% height=80% 
 class="center">
@@ -86,11 +86,11 @@ GMM単体はPSNR/SSIM/LPIPSすべてで一貫した改善が見られました�
 | `analyze_hash_collisions.py` | 学習済み`point_cloud.ply`のhash-grid各levelでの衝突統計を分析 |
 | `analyze_mutual_info.py` | scaling/offset/anchor_feature間の相互情報量を分析 |
 
-## Installation
+## インストール
 
-We tested our code on a server with Ubuntu 20.04.1, cuda 11.8, gcc 9.4.0.
+Ubuntu 20.04.1、cuda 11.8、gcc 9.4.0のサーバー環境でテスト済みです。
 
-1. Unzip files
+1. ファイルを解凍
 ```
 cd submodules
 unzip diff-gaussian-rasterization.zip
@@ -99,123 +99,123 @@ unzip simple-knn.zip
 unzip arithmetic.zip
 cd ..
 ```
-2. Install environment
+2. 環境をインストール
 ```
 conda env create --file environment.yml
 conda activate HAC_env
 ```
 
-3. Install ```tmc3``` (for GPCC)
+3. ```tmc3```（GPCC用）をインストール
 
-- Please refer to [tmc3 github](https://github.com/MPEGGroup/mpeg-pcc-tmc13) for installation.
-- Don't forget to add ```tmc3``` to your environment variable, otherwise you must manually specify its location [in our code](https://github.com/YihangChen-ee/HAC-plus/blob/main/utils/gpcc_utils.py). 
-- Tips: ```tmc3``` is commonly located at ```/PATH/TO/mpeg-pcc-tmc13/build/tmc3```.
+- インストール方法は[tmc3のGithub](https://github.com/MPEGGroup/mpeg-pcc-tmc13)を参照してください。
+- ```tmc3```を環境変数に追加するのを忘れないでください。追加しない場合は[コード内](https://github.com/YihangChen-ee/HAC-plus/blob/main/utils/gpcc_utils.py)で手動でその場所を指定する必要があります。
+- Tips: ```tmc3```は通常```/PATH/TO/mpeg-pcc-tmc13/build/tmc3```にあります。
 
-## Data
+## データ
 
-First, create a ```data/``` folder inside the project path by 
+まず、プロジェクトパス内に以下のコマンドで```data/```フォルダを作成してください。
 ```
 mkdir data
 ```
 
-The data structure will be organised as follows:
+データ構造は次のように整理されます:
 
 ```
 data/
 ├── dataset_name
-│   ├── scene1/
-│   │   ├── images
-│   │   │   ├── IMG_0.jpg
-│   │   │   ├── IMG_1.jpg
-│   │   │   ├── ...
-│   │   ├── sparse/
-│   │       └──0/
-│   ├── scene2/
-│   │   ├── images
-│   │   │   ├── IMG_0.jpg
-│   │   │   ├── IMG_1.jpg
-│   │   │   ├── ...
-│   │   ├── sparse/
-│   │       └──0/
+│   ├── scene1/
+│   │   ├── images
+│   │   │   ├── IMG_0.jpg
+│   │   │   ├── IMG_1.jpg
+│   │   │   ├── ...
+│   │   ├── sparse/
+│   │       └──0/
+│   ├── scene2/
+│   │   ├── images
+│   │   │   ├── IMG_0.jpg
+│   │   │   ├── IMG_1.jpg
+│   │   │   ├── ...
+│   │   ├── sparse/
+│   │       └──0/
 ...
 ```
 
- - For instance: `./data/blending/drjohnson/`
- - For instance: `./data/bungeenerf/amsterdam/`
- - For instance: `./data/mipnerf360/bicycle/`
- - For instance: `./data/nerf_synthetic/chair/`
- - For instance: `./data/tandt/train/`
+ - 例: `./data/blending/drjohnson/`
+ - 例: `./data/bungeenerf/amsterdam/`
+ - 例: `./data/mipnerf360/bicycle/`
+ - 例: `./data/nerf_synthetic/chair/`
+ - 例: `./data/tandt/train/`
 
 
-### Public Data (We follow suggestions from [Scaffold-GS](https://github.com/city-super/Scaffold-GS))
+### 公開データセット ([Scaffold-GS](https://github.com/city-super/Scaffold-GS)の案内に従っています)
 
- - The **BungeeNeRF** dataset is available in [Google Drive](https://drive.google.com/file/d/1nBLcf9Jrr6sdxKa1Hbd47IArQQ_X8lww/view?usp=sharing)/[百度网盘[提取码:4whv]](https://pan.baidu.com/s/1AUYUJojhhICSKO2JrmOnCA). 
- - The **MipNeRF360** scenes are provided by the paper author [here](https://jonbarron.info/mipnerf360/). And we test on its entire 9 scenes ```bicycle, bonsai, counter, garden, kitchen, room, stump, flowers, treehill```. 
- - The SfM datasets for **Tanks&Temples** and **Deep Blending** are hosted by 3D-Gaussian-Splatting [here](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/input/tandt_db.zip). Download and uncompress them into the ```data/``` folder.
+ - **BungeeNeRF** データセットは[Google Drive](https://drive.google.com/file/d/1nBLcf9Jrr6sdxKa1Hbd47IArQQ_X8lww/view?usp=sharing)/[百度网盘[提取码:4whv]](https://pan.baidu.com/s/1AUYUJojhhICSKO2JrmOnCA)から入手できます。
+ - **MipNeRF360** のシーンは論文著者による[こちら](https://jonbarron.info/mipnerf360/)で提供されています。全9シーン```bicycle, bonsai, counter, garden, kitchen, room, stump, flowers, treehill```でテストしています。
+ - **Tanks&Temples** と **Deep Blending** のSfMデータセットは、3D-Gaussian-Splattingが[こちら](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/input/tandt_db.zip)でホストしています。ダウンロードして```data/```フォルダに解凍してください。
 
-### Custom Data
+### カスタムデータ
 
-For custom data, you should process the image sequences with [Colmap](https://colmap.github.io/) to obtain the SfM points and camera poses. Then, place the results into ```data/``` folder.
+カスタムデータの場合は、[Colmap](https://colmap.github.io/)で画像シーケンスを処理し、SfM点群とカメラ姿勢を取得してください。その後、結果を```data/```フォルダに配置します。
 
-## Training
+## 学習
 
-To train scenes, we provide the following training scripts: 
+シーンを学習するために、以下の学習スクリプトを用意しています:
  - Tanks&Temples: ```run_shell_tnt.py```
  - MipNeRF360: ```run_shell_mip360.py```
  - BungeeNeRF: ```run_shell_bungee.py```
  - Deep Blending: ```run_shell_db.py```
  - Nerf Synthetic: ```run_shell_blender.py```
 
- run them with 
+ 以下のように実行します:
  ```
  python run_shell_xxx.py
  ```
 
-The code will automatically run the entire process of: **training, encoding, decoding, testing**.
- - Training log will be recorded in `output.log` of the output directory. Results of **detailed fidelity, detailed size, detailed time** will all be recorded
- - Encoded bitstreams will be stored in `./bitstreams` of the output directory.
- - Evaluated output images will be saved in `./test/ours_30000/renders` of the output directory.
- - Optionally, you can change `lmbda` in these `run_shell_xxx.py` scripts to try variable bitrate.
- - **After training, the original model `point_cloud.ply` is losslessly compressed as `./bitstreams`. You should refer to `./bitstreams` to get the final model size, but not `point_cloud.ply`. You can even delete `point_cloud.ply` if you like :).**
+このコードは **学習、エンコード、デコード、テスト** の全工程を自動的に実行します。
+ - 学習ログは出力ディレクトリの`output.log`に記録されます。**詳細な忠実度、詳細なサイズ、詳細な時間**の結果がすべて記録されます。
+ - エンコードされたビットストリームは出力ディレクトリの`./bitstreams`に保存されます。
+ - 評価用の出力画像は出力ディレクトリの`./test/ours_30000/renders`に保存されます。
+ - オプションとして、これらの`run_shell_xxx.py`スクリプト内の`lmbda`を変更することで可変ビットレートを試せます。
+ - **学習後、元のモデル`point_cloud.ply`は`./bitstreams`として可逆圧縮されます。最終的なモデルサイズは`point_cloud.ply`ではなく`./bitstreams`を参照してください。`point_cloud.ply`は削除しても構いません :)。**
 
-## Reproducibility
+## 再現性
 
-To ensure reproducible results across multiple runs, we have added random seed control:
+複数回の実行で結果を再現可能にするため、乱数シード制御を追加しています:
 
-### Setting Random Seed
+### 乱数シードの設定
 
-All training scripts now support the `--seed` parameter. The default seed is `0`, but you can specify a custom seed:
+すべての学習スクリプトは`--seed`パラメータに対応しています。デフォルトのシードは`0`ですが、カスタムシードを指定できます:
 
 ```bash
 python train.py -s ./data/tandt/truck --eval --lmbda 0.004 --seed 42
 ```
 
-### Multi-Lambda Experiments
+### 複数λでの実験
 
-For running experiments with multiple lambda values while maintaining reproducibility:
+再現性を保ちながら複数のλ値で実験を行うには:
 
 ```bash
 python run_multi_lambda_experiments.py
 ```
 
-You can customize the random seed in the script by modifying the `RANDOM_SEED` variable (default: `42`).
+スクリプト内の`RANDOM_SEED`変数を変更することで乱数シードをカスタマイズできます（デフォルト: `42`）。
 
-### What's Fixed for Reproducibility
+### 再現性のために固定されているもの
 
-- Random seeds for Python, NumPy, PyTorch (CPU and CUDA)
-- CuDNN deterministic mode enabled
-- CuDNN benchmark disabled
-- Consistent camera sampling order
+- Python、NumPy、PyTorch（CPUおよびCUDA）の乱数シード
+- CuDNN決定論的モードの有効化
+- CuDNNベンチマークの無効化
+- 一貫したカメラサンプリング順序
 
-**Note:** Even with fixed seeds, minor numerical differences may occur across different hardware or CUDA versions.
+**注意:** シードを固定していても、異なるハードウェアやCUDAバージョン間ではわずかな数値差が生じる場合があります。
 
-## Contact
+## 連絡先
 
 - Yihang Chen: yhchen.ee@sjtu.edu.cn
 
-## Citation
+## 引用
 
-If you find our work helpful, please consider citing:
+本研究が役立った場合は、以下の引用をご検討ください:
 
 ```bibtex
 @inproceedings{hac2024,
@@ -235,12 +235,12 @@ If you find our work helpful, please consider citing:
 ```
 
 
-## LICENSE
+## ライセンス
 
-Please follow the LICENSE of [3D-GS](https://github.com/graphdeco-inria/gaussian-splatting).
+[3D-GS](https://github.com/graphdeco-inria/gaussian-splatting)のLICENSEに従ってください。
 
-## Acknowledgement
+## 謝辞
 
- - We thank all authors from [3D-GS](https://github.com/graphdeco-inria/gaussian-splatting) for presenting such an excellent work.
- - We thank all authors from [Scaffold-GS](https://github.com/city-super/Scaffold-GS) for presenting such an excellent work. 
- - We thank [Xiangrui](https://liuxiangrui.github.io)'s help on GPCC codec.
+ - このような素晴らしい研究を発表してくださった[3D-GS](https://github.com/graphdeco-inria/gaussian-splatting)の著者の皆様に感謝します。
+ - このような素晴らしい研究を発表してくださった[Scaffold-GS](https://github.com/city-super/Scaffold-GS)の著者の皆様に感謝します。
+ - GPCCコーデックに関して協力してくださった[Xiangrui](https://liuxiangrui.github.io)さんに感謝します。
