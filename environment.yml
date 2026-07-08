@@ -1,4 +1,4 @@
-name: HAC_env
+name: HAC_plux_env
 channels:
   - pytorch
   - pyg

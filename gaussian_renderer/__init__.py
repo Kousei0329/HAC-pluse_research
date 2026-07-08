@@ -41,7 +41,8 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     bit_per_scaling_param = None
     bit_per_offsets_param = None
     Q_feat = 1
-    Q_scaling = 0.001
+    # Q_scaling変更
+    Q_scaling = 0.1
     Q_offsets = 0.2
     if is_training:
         if step > 3000 and step <= 10000:
@@ -83,7 +84,8 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
                 torch.split(feat_context, split_size_or_sections=[pc.feat_dim, pc.feat_dim, pc.feat_dim, 6, 6, 3*pc.n_offsets, 3*pc.n_offsets, 1, 1, 1], dim=-1)
 
             Q_feat = 1
-            Q_scaling = 0.001
+            # Q_scaling変更
+            Q_scaling = 0.1
             Q_offsets = 0.2
             Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
             Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
@@ -92,6 +94,7 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
             Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
             Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
             feat_chosen = feat_chosen + torch.empty_like(feat_chosen).uniform_(-0.5, 0.5) * Q_feat
+            # mean_adj, scale_adj, prob_adj, gate = pc.get_deform_mlp.forward(feat_chosen, torch.cat([mean, scale, prob], dim=-1))
             mean_adj, scale_adj, prob_adj = pc.get_deform_mlp.forward(feat_chosen, torch.cat([mean, scale, prob], dim=-1))
             probs = torch.stack([prob, prob_adj], dim=-1)
             probs = torch.softmax(probs, dim=-1)

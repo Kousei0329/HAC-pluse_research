@@ -28,7 +28,7 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import prefilter_voxel, render, network_gui
 import sys
-from scene import Scene, GaussianModel
+from scene import Scene, GaussianModel, HierarchicalGaussianModel
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
@@ -82,19 +82,54 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
     tb_writer = prepare_output_and_logger(dataset)
 
     is_synthetic_nerf = os.path.exists(os.path.join(dataset.source_path, "transforms_train.json"))
-    gaussians = GaussianModel(
-        dataset.feat_dim,
-        dataset.n_offsets,
-        dataset.voxel_size,
-        dataset.update_depth,
-        dataset.update_init_factor,
-        dataset.update_hierachy_factor,
-        dataset.use_feat_bank,
-        n_features_per_level=args_param.n_features,
-        log2_hashmap_size=args_param.log2,
-        log2_hashmap_size_2D=args_param.log2_2D,
-        is_synthetic_nerf=is_synthetic_nerf,
-    )
+
+    # Choose model type based on use_hierarchical flag
+    if dataset.use_hierarchical:
+        print(f"Using HierarchicalGaussianModel with:")
+        print(f"  level1_voxel_scale={dataset.level1_voxel_scale}")
+        print(f"  level2_per_level1={dataset.level2_per_level1}")
+        print(f"  intra_anchor_type={dataset.intra_anchor_type}")
+        gaussians = HierarchicalGaussianModel(
+            dataset.feat_dim,
+            dataset.n_offsets,
+            dataset.voxel_size,
+            dataset.update_depth,
+            dataset.update_init_factor,
+            dataset.update_hierachy_factor,
+            dataset.use_feat_bank,
+            n_features_per_level=args_param.n_features,
+            log2_hashmap_size=args_param.log2,
+            log2_hashmap_size_2D=args_param.log2_2D,
+            is_synthetic_nerf=is_synthetic_nerf,
+            use_hierarchical=dataset.use_hierarchical,
+            level1_voxel_scale=dataset.level1_voxel_scale,
+            level2_per_level1=dataset.level2_per_level1,
+            intra_anchor_type=dataset.intra_anchor_type,
+            mamba_hidden_dim=dataset.mamba_hidden_dim,
+            mamba_d_state=dataset.mamba_d_state,
+            mamba_d_conv=dataset.mamba_d_conv,
+            mamba_n_layers=dataset.mamba_n_layers,
+            use_gated_mlp=args_param.use_gated_mlp,
+            use_spatial_context=args_param.use_spatial_context,
+            use_joint_context=args_param.use_joint_context,
+        )
+    else:
+        gaussians = GaussianModel(
+            dataset.feat_dim,
+            dataset.n_offsets,
+            dataset.voxel_size,
+            dataset.update_depth,
+            dataset.update_init_factor,
+            dataset.update_hierachy_factor,
+            dataset.use_feat_bank,
+            n_features_per_level=args_param.n_features,
+            log2_hashmap_size=args_param.log2,
+            log2_hashmap_size_2D=args_param.log2_2D,
+            is_synthetic_nerf=is_synthetic_nerf,
+            use_gated_mlp=args_param.use_gated_mlp,
+            use_spatial_context=args_param.use_spatial_context,
+            use_joint_context=args_param.use_joint_context,
+        )
     scene = Scene(dataset, gaussians, ply_path=ply_path)
     gaussians.update_anchor_bound()
 
@@ -114,7 +149,15 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
     log_time_sub = 0
     for iteration in range(first_iter, opt.iterations + 1):
 
-        # network gui not available in scaffold-gs yet
+
+        if iteration == 10:
+            print("==== MASK-RELATED PARAMS ====")
+            for name, p in gaussians.named_parameters():
+                if "mask" in name.lower():
+                    print(f"{name}: shape={p.shape}, requires_grad={p.requires_grad}")
+            # network gui not available in scaffold-gs yet
+
+
         if network_gui.conn == None:
             network_gui.try_connect()
         while network_gui.conn != None:
@@ -158,16 +201,25 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
 
         if iteration % 1000 == 0 and bit_per_param is not None:
 
-            ttl_size_feat_MB = bit_per_feat_param.item() * gaussians.get_anchor.shape[0] * gaussians.feat_dim / bit2MB_scale
-            ttl_size_scaling_MB = bit_per_scaling_param.item() * gaussians.get_anchor.shape[0] * 6 / bit2MB_scale
-            ttl_size_offsets_MB = bit_per_offsets_param.item() * gaussians.get_anchor.shape[0] * 3 * gaussians.n_offsets / bit2MB_scale
-            ttl_size_MB = ttl_size_feat_MB + ttl_size_scaling_MB + ttl_size_offsets_MB
+            # 全anchorを使ってビット数を正確に計算
+            with torch.no_grad():
+                ttl_bits_feat, ttl_bits_scaling, ttl_bits_offsets = gaussians.compute_total_bits()
+                ttl_size_feat_MB = ttl_bits_feat / bit2MB_scale
+                ttl_size_scaling_MB = ttl_bits_scaling / bit2MB_scale
+                ttl_size_offsets_MB = ttl_bits_offsets / bit2MB_scale
+                ttl_size_MB = ttl_size_feat_MB + ttl_size_scaling_MB + ttl_size_offsets_MB
+
+                # visible anchorからの推定値も参考として計算
+                ttl_size_feat_MB_approx = bit_per_feat_param.item() * gaussians.get_anchor.shape[0] * gaussians.feat_dim / bit2MB_scale
+                ttl_size_scaling_MB_approx = bit_per_scaling_param.item() * gaussians.get_anchor.shape[0] * 6 / bit2MB_scale
+                ttl_size_offsets_MB_approx = bit_per_offsets_param.item() * gaussians.get_anchor.shape[0] * 3 * gaussians.n_offsets / bit2MB_scale
 
             logger.info("\n----------------------------------------------------------------------------------------")
-            logger.info("\n-----[ITER {}] bits info: bit_per_feat_param={}, anchor_num={}, ttl_size_feat_MB={}-----".format(iteration, bit_per_feat_param.item(), gaussians.get_anchor.shape[0], ttl_size_feat_MB))
-            logger.info("\n-----[ITER {}] bits info: bit_per_scaling_param={}, anchor_num={}, ttl_size_scaling_MB={}-----".format(iteration, bit_per_scaling_param.item(), gaussians.get_anchor.shape[0], ttl_size_scaling_MB))
-            logger.info("\n-----[ITER {}] bits info: bit_per_offsets_param={}, anchor_num={}, ttl_size_offsets_MB={}-----".format(iteration, bit_per_offsets_param.item(), gaussians.get_anchor.shape[0], ttl_size_offsets_MB))
-            logger.info("\n-----[ITER {}] bits info: bit_per_param={}, anchor_num={}, ttl_size_MB={}-----".format(iteration, bit_per_param.item(), gaussians.get_anchor.shape[0], ttl_size_MB))
+            logger.info("\n-----[ITER {}] bits info (accurate): ttl_size_feat_MB={}, ttl_size_scaling_MB={}, ttl_size_offsets_MB={}, ttl_size_MB={}-----".format(
+                iteration, ttl_size_feat_MB, ttl_size_scaling_MB, ttl_size_offsets_MB, ttl_size_MB))
+            logger.info("\n-----[ITER {}] bits info (approx from visible): bit_per_feat_param={}, ttl_size_feat_MB_approx={}-----".format(
+                iteration, bit_per_feat_param.item(), ttl_size_feat_MB_approx))
+            logger.info("\n-----[ITER {}] bits info: anchor_num={}-----".format(iteration, gaussians.get_anchor.shape[0]))
             with torch.no_grad():
                 binary_grid_masks_anchor = gaussians.get_mask_anchor.float()
                 mask_1_rate, mask_size_bit, mask_size_MB, mask_numel = get_binary_vxl_size(binary_grid_masks_anchor + 0.0)  # [0, 1] -> [-1, 1]
@@ -177,7 +229,8 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
         Ll1 = l1_loss(image, gt_image)
 
         ssim_loss = (1.0 - ssim(image, gt_image))
-        scaling_reg = scaling.prod(dim=1).mean()
+        # scaling_reg = scaling.prod(dim=1).mean()
+        scaling_reg = (scaling[:, 0] * scaling[:, 1] * scaling[:, 2]).mean()
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
 
         if bit_per_param is not None:
@@ -186,6 +239,35 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             loss = loss + args_param.lmbda * (bit_per_param + bit_hash_grid / denom)
 
         loss.backward()
+
+        # ★ ここからデバッグ
+        if iteration in [1000, 5000, 10000, 20000]:
+            print("==== MASK GRAD DEBUG ====")
+            for name, p in gaussians.named_parameters():
+                if "mask" in name.lower():
+                    mean_val = p.data.mean().item()
+                    grad_none = (p.grad is None)
+                    grad_norm = p.grad.norm().item() if p.grad is not None else 0.0
+                    print(f"{name}: mean={mean_val:.4f}, grad_none={grad_none}, grad_norm={grad_norm:.4e}")
+
+            # 直接アクセス版（名前が分かっているので）
+            if hasattr(gaussians, "_mask_level1"):
+                p = gaussians._mask_level1
+                m = p.data
+                g = p.grad
+                print(f"_mask_level1 sigmoid mean={m.sigmoid().mean().item():.4f}, "
+                      f"grad_none={g is None}, grad_norm={(g.norm().item() if g is not None else 0.0):.4e}")
+
+            if hasattr(gaussians, "_mask"):
+                p = gaussians._mask
+                m = p.data
+                g = p.grad
+                print(f"_mask sigmoid mean={m.sigmoid().mean().item():.4f}, "
+                      f"grad_none={g is None}, grad_norm={(g.norm().item() if g is not None else 0.0):.4e}")
+        # ★ ここまで
+
+
+
 
         iter_end.record()
 
@@ -213,6 +295,11 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             if iteration < opt.update_until and iteration > opt.start_stat:
                 # add statis
                 gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
+
+                # Level 1の統計情報も追跡（階層的モデルの場合）
+                if hasattr(gaussians, 'training_statis_level1'):
+                    gaussians.training_statis_level1(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
+
                 if iteration not in range(3000, 4000):  # let the model get fit to quantization
                     # densification
                     if iteration > opt.update_from and iteration % opt.update_interval == 0:
@@ -221,6 +308,14 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
                 del gaussians.offset_denom
+
+                # Level 1の統計情報も削除（階層的モデルの場合）
+                if hasattr(gaussians, 'opacity_accum_level1'):
+                    del gaussians.opacity_accum_level1
+                    del gaussians.offset_gradient_accum_level1
+                    del gaussians.offset_denom_level1
+                    del gaussians.anchor_demon_level1
+
                 torch.cuda.empty_cache()
 
             if iteration < opt.iterations:
@@ -431,6 +526,7 @@ def render_sets(args_param, dataset : ModelParams, iteration : int, pipeline : P
             log2_hashmap_size_2D=args_param.log2_2D,
             decoded_version=run_codec,
             is_synthetic_nerf=is_synthetic_nerf,
+            use_gated_mlp=args_param.use_gated_mlp,
         )
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
         gaussians.eval()
@@ -583,6 +679,9 @@ if __name__ == "__main__":
     parser.add_argument("--log2_2D", type=int, default = 15)
     parser.add_argument("--n_features", type=int, default = 4)
     parser.add_argument("--lmbda", type=float, default = 0.001)
+    parser.add_argument("--use_gated_mlp", action='store_true', default=False, help='Use gated MLP for channel context')
+    parser.add_argument("--use_spatial_context", action='store_true', default=False, help='Use spatial context module for hash features')
+    parser.add_argument('--use_joint_context', action='store_true', default=False, help='Use joint context module for joint features')
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 

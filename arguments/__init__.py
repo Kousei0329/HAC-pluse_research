@@ -44,7 +44,7 @@ class ParamGroup:
                 setattr(group, arg[0], arg[1])
         return group
 
-class ModelParams(ParamGroup): 
+class ModelParams(ParamGroup):
     def __init__(self, parser, sentinel=False):
         self.sh_degree = 3
         self.feat_dim = 50
@@ -55,6 +55,19 @@ class ModelParams(ParamGroup):
         self.update_hierachy_factor = 4
 
         self.use_feat_bank = False
+
+        # Hierarchical anchor parameters
+        self.use_hierarchical = False
+        self.level1_voxel_scale = 4.0
+        self.level2_per_level1 = 64
+
+        # Intra-Anchor module type: 'mlp', 'mamba', 'spatial_mamba'
+        self.intra_anchor_type = 'mlp'
+        self.mamba_hidden_dim = 256
+        self.mamba_d_state = 16
+        self.mamba_d_conv = 4
+        self.mamba_n_layers = 2
+
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -94,6 +107,7 @@ class OptimizationParams(ParamGroup):
         self.mask_lr_final = 0.0001
         self.mask_lr_delay_mult = 0.01
         self.mask_lr_max_steps = 30_000
+        self.freeze_mask = False  # マスクの学習を停止するかどうか
 
         self.feature_lr = 0.0075
         self.opacity_lr = 0.02

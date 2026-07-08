@@ -34,6 +34,18 @@ class Entropy_gaussian(nn.Module):
     def forward(self, x, mean, scale, Q=None, x_mean=None):
         if Q is None:
             Q = self.Q
+
+        # Check for NaN values and handle them
+        if torch.isnan(x).any():
+            print(f"Warning: NaN detected in x ({torch.isnan(x).sum().item()} values)")
+            x = torch.nan_to_num(x, nan=0.0)
+        if torch.isnan(mean).any():
+            print(f"Warning: NaN detected in mean ({torch.isnan(mean).sum().item()} values)")
+            mean = torch.nan_to_num(mean, nan=0.0)
+        if torch.isnan(scale).any():
+            print(f"Warning: NaN detected in scale ({torch.isnan(scale).sum().item()} values)")
+            scale = torch.nan_to_num(scale, nan=1e-9)
+
         if use_clamp:
             if x_mean is None:
                 x_mean = x.mean()

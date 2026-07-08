@@ -1,0 +1,29 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Compiled extensions / build artifacts
+*.so
+*.o
+build/
+*.egg-info/
+.ninja_deps
+.ninja_log
+
+# Training outputs
+/outputs
+
+# Environment files
+environment_mamba.yaml
+
+/rd_plots
+/red_plots_normal
+
+# Archive dumps / macOS zip artifacts
+*.zip
+__MACOSX/
+.DS_Store
+
+# Vendored third-party generated docs
+submodules/diff-gaussian-rasterization/third_party/glm/doc/
