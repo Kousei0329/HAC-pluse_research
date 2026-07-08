@@ -5,6 +5,9 @@ from datetime import datetime
 # This is a workaround for newer GPUs (Compute Capability 8.9) with older PyTorch
 os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6'
 
+# Random seed for reproducibility
+RANDOM_SEED = 42
+
 for lmbda in [0.004]:  # Optionally, you can try: 0.003, 0.002, 0.001, 0.0005
     # for cuda, scene in enumerate(['truck', 'train']):
     for cuda, scene in enumerate(['truck']):
@@ -29,7 +32,8 @@ for lmbda in [0.004]:  # Optionally, you can try: 0.003, 0.002, 0.001, 0.0005
         # one_cmd = f'CUDA_VISIBLE_DEVICES={0} python train.py  --use_spatial_context -s {data_path} --eval --resolution 320 --lod 0 --voxel_size 0.01 --update_init_factor 16 --iterations 30_000 -m outputs/tandt_test/{scene}/{lmbda}_Q=0.1_Context_fix --lmbda {lmbda} --mask_lr_final {mask_lr_final}'
 
         now = datetime.now()
-        one_cmd = f'CUDA_VISIBLE_DEVICES={0} python train.py  --use_joint_context -s {data_path} --eval --resolution 320 --lod 0 --voxel_size 0.01 --update_init_factor 16 --iterations 30_000 -m outputs/tandt_test/{scene}/{now:%Y-%m-%d}_\${now:%H-%M-%S}_{lmbda}_Q=0.1_PointNet --lmbda {lmbda} --mask_lr_final {mask_lr_final}'
+        one_cmd = f'CUDA_VISIBLE_DEVICES={0} python train.py  -s {data_path} --eval  --lod 0 --voxel_size 0.01 --update_init_factor 16 --iterations 30_000 -m outputs/tandt_test/{scene}/_Q=0.1_afterTanh_PointNet{now:%Y-%m-%d}_\${now:%H-%M-%S}_{lmbda} --lmbda {lmbda} --mask_lr_final {mask_lr_final} --seed {RANDOM_SEED}'
+        # one_cmd = f'CUDA_VISIBLE_DEVICES={0} python train.py  -s {data_path} --eval --resolution 320 --lod 0 --voxel_size 0.01 --update_init_factor 16 --iterations 30_000 -m outputs/tandt_test/{scene}/{now:%Y-%m-%d}_\${now:%H-%M-%S}_{lmbda}_Q=0.1_attention --lmbda {lmbda} --mask_lr_final {mask_lr_final}'
 
 
 

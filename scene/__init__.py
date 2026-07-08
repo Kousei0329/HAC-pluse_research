@@ -71,8 +71,9 @@ class Scene:
                 json.dump(json_cams, file)
 
         if shuffle:
-            random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
-            random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
+            # Multi-res consistent random shuffling - now deterministic with global seed
+            random.shuffle(scene_info.train_cameras)
+            random.shuffle(scene_info.test_cameras)
 
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 
