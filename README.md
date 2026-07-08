@@ -41,6 +41,51 @@ class="center">
 </p>
 
 
+## 独自拡張・実験のまとめ（本フォーク）
+
+本フォークでは、オリジナルの HAC++ をベースに、圧縮率・画質のさらなる改善を狙ったアーキテクチャ変更と実験的機能を追加しています。
+
+### デフォルトで有効になっている改善
+
+| 項目 | 内容 | 関連コード |
+|---|---|---|
+| GMM entropy model | anchor特徴のエントロピー符号化を単一ガウス分布から2成分混合ガウス分布(GMM)に変更 | `utils/entropy_models.py: Entropy_gaussian_mix_prob_2`, `scene/gaussian_model.py: self.EG_mix_prob_2` |
+| GLU (Gated Linear Unit) 活性化 | context用MLP群の活性化関数をReLUからGEGLUに置き換え | `scene/gaussian_model.py: GEGLU` / `GEGLUAct` |
+| Causal K-NN 空間コンテキスト | Morton順ソート済みアンカー列に対し、因果的（未来を見ない）K近傍集約 + 学習可能温度 + クロスチャンクlookbackでhash特徴を補正 | `scene/gaussian_model.py: CausalKNNContext`（`--use_causal_knn`, デフォルト`True`） |
+| AnchorCondNorm | anchorのscale/offset/featureで条件付けした3段FiLM正規化 | `scene/gaussian_model.py: AnchorCondNorm` |
+| RENOニューラル点群コーデック | アンカー座標(xyz)の圧縮をG-PCCから学習ベースのニューラルコーデック(RENO)に置換。学習中にRENOのネットワーク重みもオンラインfine-tuning可能 | `utils/reno_utils.py`（`--use_reno`, `--train_reno`, デフォルト共に`True`） |
+
+### オプションの実験的機能（コマンドライン引数で切替）
+
+| 機能 | 概要 | 有効化方法 |
+|---|---|---|
+| 階層的アンカー構造 (Hierarchical Anchor) | アンカーを粗いLevel 1と細かいLevel 2の2階層に分割。Level 1のみを圧縮・保存し、Level 2はMLPでLevel 1から復元時に再生成することでアンカー座標の保存量を理論値で最大1/64に削減 | `--use_hierarchical --level1_voxel_scale 4.0 --level2_per_level1 16`（詳細: [`README_HIERARCHICAL.md`](README_HIERARCHICAL.md)） |
+| Mamba Intra-Anchor | Level1→Level2生成MLPを状態空間モデル(Mamba)に置換。`spatial_mamba`はZ-order curveソート+双方向Mambaで空間近傍関係を保持 | `--intra_anchor_type mamba` または `spatial_mamba`（詳細: [`README_MAMBA.md`](README_MAMBA.md)） |
+
+### 検証したが採用しなかった手法（Ablation）
+
+コンテキスト集約モジュールとして、hash-grid特徴の代わりに点群系バックボーンで置き換える実験も行いました（`utils/pointnet.py`, `pointnetpp.py`, `pointtransformer.py`, `octree_encoder.py`）。Tanks&Temples truckシーンで λ∈{0.001, 0.002, 0.003, 0.004, 0.005}の5点でBaseline(HAC++)と比較した結果（`plot_rd.py`で算出。BD-Rateは負の値ほど「同一画質でのビットレート削減=改善」を意味する）：
+
+| 手法 | BD-Rate vs PSNR [%] | BD-Rate vs SSIM [%] | BD-Rate vs LPIPS [%] |
+|---|---:|---:|---:|
+| Only GMM | -2.64 | -0.82 | -3.86 |
+| Only GLU | +7.08 | -8.48 | -14.60 |
+| Only PointTransformer | +12.57 | -3.43 | -2.62 |
+| Only PointNet | +43.12 | -7.54 | -10.00 |
+
+GMM単体はPSNR/SSIM/LPIPSすべてで一貫した改善が見られましたが、GLUや点群系バックボーンはSSIM/LPIPS（知覚品質）は改善する一方でPSNRベースのビットレートは悪化する傾向があり、特にPointNet/PointTransformerは大幅に悪化しました。このため最終的にデフォルト実装にはGMMとGLUのみを組み込み、点群バックボーン(PointNet/PointNet++/PointTransformer/Octree)は不採用としています。
+
+### 実験・解析ツール
+
+| スクリプト | 用途 |
+|---|---|
+| `run_multi_lambda_experiments.py` / `run_muliti_lambda_tnt.py` | 複数のλ（レート点）を固定シードで自動的に一括学習 |
+| `plot_rd.py` | RDカーブ（PSNR/SSIM/LPIPS vs サイズ）とBD-Rateの算出・プロット |
+| `plot_lambda_results.py` | 学習ログからPSNR/SSIM/LPIPS/lossの推移を可視化 |
+| `export_results_to_excel.py` | 実験結果ディレクトリからExcelサマリーを生成 |
+| `analyze_hash_collisions.py` | 学習済み`point_cloud.ply`のhash-grid各levelでの衝突統計を分析 |
+| `analyze_mutual_info.py` | scaling/offset/anchor_feature間の相互情報量を分析 |
+
 ## Installation
 
 We tested our code on a server with Ubuntu 20.04.1, cuda 11.8, gcc 9.4.0.
@@ -133,6 +178,36 @@ The code will automatically run the entire process of: **training, encoding, dec
  - Optionally, you can change `lmbda` in these `run_shell_xxx.py` scripts to try variable bitrate.
  - **After training, the original model `point_cloud.ply` is losslessly compressed as `./bitstreams`. You should refer to `./bitstreams` to get the final model size, but not `point_cloud.ply`. You can even delete `point_cloud.ply` if you like :).**
 
+## Reproducibility
+
+To ensure reproducible results across multiple runs, we have added random seed control:
+
+### Setting Random Seed
+
+All training scripts now support the `--seed` parameter. The default seed is `0`, but you can specify a custom seed:
+
+```bash
+python train.py -s ./data/tandt/truck --eval --lmbda 0.004 --seed 42
+```
+
+### Multi-Lambda Experiments
+
+For running experiments with multiple lambda values while maintaining reproducibility:
+
+```bash
+python run_multi_lambda_experiments.py
+```
+
+You can customize the random seed in the script by modifying the `RANDOM_SEED` variable (default: `42`).
+
+### What's Fixed for Reproducibility
+
+- Random seeds for Python, NumPy, PyTorch (CPU and CUDA)
+- CuDNN deterministic mode enabled
+- CuDNN benchmark disabled
+- Consistent camera sampling order
+
+**Note:** Even with fixed seeds, minor numerical differences may occur across different hardware or CUDA versions.
 
 ## Contact
 
