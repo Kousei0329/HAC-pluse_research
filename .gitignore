@@ -18,7 +18,7 @@ build/
 environment_mamba.yaml
 
 /rd_plots
-/red_plots_normal
+/rd_plots_normal
 
 # Archive dumps / macOS zip artifacts
 *.zip
