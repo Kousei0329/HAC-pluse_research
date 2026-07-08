@@ -2,33 +2,37 @@
 RENO-based anchor position compression utilities.
 Drop-in replacement for compress_gpcc / decompress_gpcc.
 
+RENO (network.py, kit/, model/) is vendored under submodules/reno/, so
+this module is self-contained within HAC-plus.
+Original project: https://github.com/NJUVISION/RENO (MIT License).
+
 Dependencies (must be installed in the active environment):
     pip install torchac
-    # torchsparse: build from source per RENO README
-
-Required:
-    /workspace/RENO  -- the RENO repository clone
+    # torchsparse: build from source, see submodules/reno/README.md
 """
 
 import io as _io
+import os as _os
 import sys
 
 import numpy as np
 import torch
 
-RENO_ROOT = '/workspace/RENO'
+RENO_ROOT = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                          'submodules', 'reno')
 
 # Module-level cache: (ckpt_path, channels, kernel_size) -> Network
 _net_cache: dict = {}
 
 
-def _ensure_path() -> None:
+def ensure_path() -> None:
+    """Put the vendored RENO root on sys.path so `import network` / `import kit.op` work."""
     if RENO_ROOT not in sys.path:
         sys.path.insert(0, RENO_ROOT)
 
 
 def _setup_torchsparse() -> None:
-    _ensure_path()
+    ensure_path()
     from torchsparse.nn import functional as F
     cfg = F.conv_config.get_default_conv_config()
     cfg.kmap_mode = "hashmap"

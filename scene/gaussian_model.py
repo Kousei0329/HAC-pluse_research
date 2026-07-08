@@ -440,7 +440,8 @@ class GaussianModel(nn.Module):
                  use_anchor_cond_norm: bool=False,
                  use_causal_knn: bool=False,
                  use_reno: bool=False,
-                 reno_ckpt_path: str='/workspace/RENO/model/Ford/ckpt.pt',
+                 reno_ckpt_path: str=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                   'submodules', 'reno', 'model', 'Ford', 'ckpt.pt'),
                  ):
         super().__init__()
         print('hash_params:', use_2D, n_features_per_level,

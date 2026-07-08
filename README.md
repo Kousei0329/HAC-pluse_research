@@ -53,7 +53,7 @@ class="center">
 | GLU (Gated Linear Unit) 活性化 | context用MLP群の活性化関数をReLUからGEGLUに置き換え | `scene/gaussian_model.py: GEGLU` / `GEGLUAct` |
 | Causal K-NN 空間コンテキスト | Morton順ソート済みアンカー列に対し、因果的（未来を見ない）K近傍集約 + 学習可能温度 + クロスチャンクlookbackでhash特徴を補正 | `scene/gaussian_model.py: CausalKNNContext`（`--use_causal_knn`, デフォルト`True`） |
 | AnchorCondNorm | anchorのscale/offset/featureで条件付けした3段FiLM正規化 | `scene/gaussian_model.py: AnchorCondNorm` |
-| RENOニューラル点群コーデック | アンカー座標(xyz)の圧縮をG-PCCから学習ベースのニューラルコーデック(RENO)に置換。学習中にRENOのネットワーク重みもオンラインfine-tuning可能 | `utils/reno_utils.py`（`--use_reno`, `--train_reno`, デフォルト共に`True`） |
+| RENOニューラル点群コーデック | アンカー座標(xyz)の圧縮をG-PCCから学習ベースのニューラルコーデック([RENO](https://github.com/NJUVISION/RENO)、MIT License)に置換。学習中にRENOのネットワーク重みもオンラインfine-tuning可能。RENO本体は`submodules/reno/`に移植済みで外部リポジトリへの依存なし（torchsparse/torchacのみ別途インストールが必要。詳細は`submodules/reno/README.md`） | `utils/reno_utils.py`（`--use_reno`, `--train_reno`, デフォルト共に`True`） |
 
 ### オプションの実験的機能（コマンドライン引数で切替）
 

@@ -351,9 +351,8 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
 
             # RENO fine-tuning step
             if reno_optimizer is not None and iteration % args_param.reno_train_interval == 0:
-                import sys as _sys
-                if '/workspace/RENO' not in _sys.path:
-                    _sys.path.insert(0, '/workspace/RENO')
+                from utils.reno_utils import ensure_path as _ensure_reno_path
+                _ensure_reno_path()
                 from torchsparse import SparseTensor as _ST
                 from torchsparse.nn import functional as _F
                 _cfg = _F.conv_config.get_default_conv_config()
@@ -751,7 +750,10 @@ if __name__ == "__main__":
     parser.add_argument('--use_causal_knn', action='store_true', default=True, help='Enable causal K-NN context aggregation for hash grid features (Morton order)')
     parser.add_argument("--seed", type=int, default=0, help='Random seed for reproducibility')
     parser.add_argument("--use_reno", action='store_true', default=True, help='Use RENO neural codec for anchor position compression instead of G-PCC')
-    parser.add_argument("--reno_ckpt_path", type=str, default='/workspace/RENO/model/Ford/ckpt.pt', help='Path to RENO checkpoint')
+    parser.add_argument("--reno_ckpt_path", type=str,
+                        default=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              'submodules', 'reno', 'model', 'Ford', 'ckpt.pt'),
+                        help='Path to RENO checkpoint')
     parser.add_argument("--train_reno", action='store_true', default=True, help='Fine-tune RENO network weights during training')
     parser.add_argument("--reno_train_interval", type=int, default=100, help='Update RENO weights every N iterations')
     parser.add_argument("--reno_lr", type=float, default=1e-4, help='Learning rate for RENO fine-tuning optimizer')
