@@ -149,6 +149,11 @@ class OptimizationParams(ParamGroup):
         self.mlp_deform_lr_delay_mult = 0.01
         self.mlp_deform_lr_max_steps = 30_000
 
+        self.causal_knn_lr_init = 0.005
+        self.causal_knn_lr_final = 0.00001
+        self.causal_knn_lr_delay_mult = 0.01
+        self.causal_knn_lr_max_steps = 30_000
+
         self.mlp_hyp_lr_init = 0.005
         self.mlp_hyp_lr_final = 0.0005
         self.mlp_hyp_lr_delay_mult = 0.01

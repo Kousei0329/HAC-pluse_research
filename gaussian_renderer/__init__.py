@@ -20,6 +20,7 @@ import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.encodings import STE_binary, STE_multistep
+from utils.gpcc_utils import calculate_morton_order
 
 
 def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask=None, is_training=False, step=0):
@@ -42,11 +43,12 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     bit_per_offsets_param = None
     Q_feat = 1
     # Q_scaling変更
-    Q_scaling = 0.1
+    # Q_scaling = 0.1
+    Q_scaling = 0.001
     Q_offsets = 0.2
     if is_training:
         if step > 3000 and step <= 10000:
-            # quantization
+            # Quantization noise - now deterministic with global seed
             feat = feat + torch.empty_like(feat).uniform_(-0.5, 0.5) * Q_feat
             grid_scaling = grid_scaling + torch.empty_like(grid_scaling).uniform_(-0.5, 0.5) * Q_scaling
             grid_offsets = grid_offsets + torch.empty_like(grid_offsets).uniform_(-0.5, 0.5) * Q_offsets
@@ -56,11 +58,42 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
 
         if step > 10000:
 
-            # for rendering
-            feat_context_orig = pc.calc_interp_feat(anchor)
-            feat_context = pc.get_grid_mlp(feat_context_orig)
+            mask_anchor_all = pc.get_mask_anchor.to(torch.bool)[:, 0]   # [N_total]
+            all_anchor_msk  = pc.get_anchor[mask_anchor_all]             # [N_mask, 3]
+            _aint = torch.round(all_anchor_msk / pc.voxel_size).long()
+            _morton  = calculate_morton_order(_aint)
+            _unsort  = torch.argsort(_morton)
+            _anc_srt = all_anchor_msk[_morton]                           # [N_mask, 3] Morton順
+
+            if pc.use_causal_knn:
+                # codec との一致を優先: anchor_feat なしで集約（codec も anchor_feat を使わない）
+                with torch.no_grad():
+                    _hf_srt  = pc.calc_interp_feat(_anc_srt)
+                    _ctx_srt = pc.causal_knn.aggregate_only(_hf_srt, _anc_srt)  # [N_mask, D]
+                _ctx_msk = _ctx_srt[_unsort]
+
+                _mask_idx = torch.full((mask_anchor_all.shape[0],), -1,
+                                       dtype=torch.long, device=all_anchor_msk.device)
+                _mask_idx[mask_anchor_all] = torch.arange(
+                    mask_anchor_all.sum(), device=all_anchor_msk.device)
+
+                _vis_mpos  = _mask_idx[visible_mask]
+                _vis_inmsk = _vis_mpos >= 0
+                _ctx_dim   = _ctx_msk.shape[-1]
+                feat_ctx_render = torch.zeros(anchor.shape[0], _ctx_dim, device=anchor.device)
+                if _vis_inmsk.any():
+                    _vis_hf = pc.calc_interp_feat(anchor[_vis_inmsk])
+                    _vis_ctx = _ctx_msk[_vis_mpos[_vis_inmsk]]
+                    feat_ctx_render[_vis_inmsk] = pc.causal_knn.apply_fusion(_vis_hf, _vis_ctx)
+            else:
+                # causal_knn なし: visible アンカーのハッシュ特徴を直接使用
+                _morton_vis = calculate_morton_order(torch.round(anchor / pc.voxel_size).long())
+                _unsort_vis = torch.argsort(_morton_vis)
+                feat_ctx_render = pc.calc_interp_feat(anchor[_morton_vis],
+                                                      anchor_feat=feat[_morton_vis])[_unsort_vis]
+
             mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                torch.split(feat_context, split_size_or_sections=[pc.feat_dim, pc.feat_dim,pc.feat_dim, 6, 6, 3*pc.n_offsets, 3*pc.n_offsets, 1, 1, 1], dim=-1)
+                pc.forward_grid(feat_ctx_render)
 
             Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
             Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
@@ -69,23 +102,41 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
             grid_scaling = grid_scaling + torch.empty_like(grid_scaling).uniform_(-0.5, 0.5) * Q_scaling
             grid_offsets = grid_offsets + torch.empty_like(grid_offsets).uniform_(-0.5, 0.5) * Q_offsets.unsqueeze(1)
 
-            # for entropy
-            choose_idx = torch.rand_like(pc.get_anchor[:, 0]) <= 0.05
-            anchor_chosen = pc.get_anchor[choose_idx]
-            feat_chosen = pc._anchor_feat[choose_idx]
-            grid_offsets_chosen = pc._offset[choose_idx]
-            grid_scaling_chosen = pc.get_scaling[choose_idx]
-            binary_grid_masks_chosen = pc.get_mask[choose_idx]  # [N_vis, 10, 1]
-            mask_anchor_chosen = pc.get_mask_anchor[choose_idx]  # [N_vis, 1]
+            # entropy estimation: mask_anchorの5%をサンプリング
+            _choose = torch.rand(all_anchor_msk.shape[0], device=all_anchor_msk.device) <= 0.05
+            anchor_chosen            = all_anchor_msk[_choose]
+            feat_chosen              = pc._anchor_feat[mask_anchor_all][_choose]
+            grid_offsets_chosen      = pc._offset[mask_anchor_all][_choose]
+            grid_scaling_chosen      = pc.get_scaling[mask_anchor_all][_choose]
+            binary_grid_masks_chosen = pc.get_mask[mask_anchor_all][_choose]
+            mask_anchor_chosen       = pc.get_mask_anchor[mask_anchor_all][_choose]
 
-            feat_context_orig = pc.calc_interp_feat(anchor_chosen)
-            feat_context = pc.get_grid_mlp(feat_context_orig)
-            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                torch.split(feat_context, split_size_or_sections=[pc.feat_dim, pc.feat_dim, pc.feat_dim, 6, 6, 3*pc.n_offsets, 3*pc.n_offsets, 1, 1, 1], dim=-1)
+            if pc.use_causal_knn:
+                # codec では anchor_feat を渡せないため、訓練時も使わない（train-codec 一致）
+                _chosen_hf  = pc.calc_interp_feat(anchor_chosen)
+                _chosen_ctx = _ctx_msk[_choose]
+                feat_context_orig = pc.causal_knn.apply_fusion(_chosen_hf, _chosen_ctx)
+            else:
+                # two-stage: scaling/offset を先に計算し、feat は scaling/offset で条件付け
+                feat_context_no_cond = pc.calc_interp_feat(anchor_chosen)
+                feat_context_orig = pc.calc_interp_feat(anchor_chosen,
+                                                        anchor_scale=grid_scaling_chosen,
+                                                        anchor_offset=grid_offsets_chosen.view(grid_offsets_chosen.shape[0], pc.n_offsets, 3))
+
+            '''GMM使用'''
+            if pc.use_causal_knn:
+                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                    pc.forward_grid(feat_context_orig)
+            else:
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                    pc.forward_grid(feat_context_no_cond)
+                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                    pc.forward_grid(feat_context_orig)
 
             Q_feat = 1
             # Q_scaling変更
-            Q_scaling = 0.1
+            # Q_scaling = 0.1
+            Q_scaling = 0.001
             Q_offsets = 0.2
             Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
             Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
@@ -93,9 +144,20 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
             Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
             Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
             Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
+            # Quantization noise for entropy calculation - now deterministic with global seed
             feat_chosen = feat_chosen + torch.empty_like(feat_chosen).uniform_(-0.5, 0.5) * Q_feat
             # mean_adj, scale_adj, prob_adj, gate = pc.get_deform_mlp.forward(feat_chosen, torch.cat([mean, scale, prob], dim=-1))
             mean_adj, scale_adj, prob_adj = pc.get_deform_mlp.forward(feat_chosen, torch.cat([mean, scale, prob], dim=-1))
+
+            # Debug: NaN/Inf check before entropy calculation
+            for dbg_name, dbg_t in [('mean', mean), ('scale', scale), ('mean_adj', mean_adj), ('scale_adj', scale_adj),
+                                    ('feat_chosen', feat_chosen), ('Q_feat', Q_feat)]:
+                if torch.is_tensor(dbg_t):
+                    n_nan = torch.isnan(dbg_t).sum().item()
+                    n_inf = torch.isinf(dbg_t).sum().item()
+                    if n_nan > 0 or n_inf > 0:
+                        print(f"[renderer] WARNING: {dbg_name} has {n_nan} NaN, {n_inf} Inf  (step={step})")
+
             probs = torch.stack([prob, prob_adj], dim=-1)
             probs = torch.softmax(probs, dim=-1)
             grid_scaling_chosen = grid_scaling_chosen + torch.empty_like(grid_scaling_chosen).uniform_(-0.5, 0.5) * Q_scaling
@@ -123,19 +185,45 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
 
     elif not pc.decoded_version:
         torch.cuda.synchronize(); t1 = time.time()
-        feat_context = pc.calc_interp_feat(anchor)
-        mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-            torch.split(pc.get_grid_mlp(feat_context), split_size_or_sections=[pc.feat_dim, pc.feat_dim, pc.feat_dim, 6, 6, 3*pc.n_offsets, 3*pc.n_offsets, 1, 1, 1], dim=-1)
-
-        Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
-        Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
-        Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1])
-        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
-        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)  # [N_visible_anchor, 10, 3]
-        feat = (STE_multistep.apply(feat, Q_feat, pc._anchor_feat.mean())).detach()
-        grid_scaling = (STE_multistep.apply(grid_scaling, Q_scaling, pc.get_scaling.mean())).detach()
-        grid_offsets = (STE_multistep.apply(grid_offsets, Q_offsets, pc._offset.mean())).detach()
+        anchor_int = torch.round(anchor / pc.voxel_size).long()
+        morton_idx = calculate_morton_order(anchor_int)
+        unsort_idx = torch.argsort(morton_idx)
+        anchor_sorted = anchor[morton_idx]
+        if pc.use_causal_knn:
+            hash_feats = pc.calc_interp_feat(anchor_sorted)
+            feat_context = pc.causal_knn(hash_feats, anchor_sorted)
+            feat_context = feat_context[unsort_idx]
+            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                pc.forward_grid(feat_context)
+            Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+            Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
+            Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1])
+            Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+            Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
+            Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
+            feat = (STE_multistep.apply(feat, Q_feat, pc._anchor_feat.mean())).detach()
+            grid_scaling = (STE_multistep.apply(grid_scaling, Q_scaling, pc.get_scaling.mean())).detach()
+            grid_offsets = (STE_multistep.apply(grid_offsets, Q_offsets, pc._offset.mean())).detach()
+        else:
+            # Stage 1: get Q_scaling/Q_offsets from unconditioned context
+            feat_context_no_cond = pc.calc_interp_feat(anchor_sorted)[unsort_idx]
+            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                pc.forward_grid(feat_context_no_cond)
+            Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
+            Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1])
+            Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
+            Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
+            grid_scaling = (STE_multistep.apply(grid_scaling, Q_scaling, pc.get_scaling.mean())).detach()
+            grid_offsets = (STE_multistep.apply(grid_offsets, Q_offsets, pc._offset.mean())).detach()
+            # Stage 2: get Q_feat conditioned on quantized scaling/offsets
+            feat_context_cond = pc.calc_interp_feat(anchor_sorted,
+                                                     grid_scaling[morton_idx],
+                                                     grid_offsets[morton_idx])[unsort_idx]
+            mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                pc.forward_grid(feat_context_cond)
+            Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+            Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+            feat = (STE_multistep.apply(feat, Q_feat, pc._anchor_feat.mean())).detach()
         torch.cuda.synchronize(); time_sub = time.time() - t1
 
     else:

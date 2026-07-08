@@ -9,6 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import math
 import os
 import time
 from functools import reduce
@@ -18,6 +19,7 @@ import torch
 from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
 from torch import nn
+import torch.nn.functional as F
 from torch_scatter import scatter_max
 
 from utils.general_utils import (build_scaling_rotation, get_expon_lr_func,
@@ -37,9 +39,6 @@ from utils.encodings_cuda import \
     encoder_gaussian_chunk, decoder_gaussian_chunk, encoder_gaussian_mixed_chunk, decoder_gaussian_mixed_chunk
 from utils.gpcc_utils import compress_gpcc, decompress_gpcc, calculate_morton_order
 
-from .masked_conv import MaskedConv2d, MaskedConv1d
-from .pointnet import PointNet
-
 bit2MB_scale = 8 * 1024 * 1024
 MAX_batch_size = 3000
 
@@ -47,7 +46,22 @@ def get_time():
     torch.cuda.synchronize()
     tt = time.time()
     return tt
+    
+class GEGLU(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.fc = nn.Linear(dim, dim * 2)
 
+    def forward(self, x):
+        v, g = self.fc(x).chunk(2, dim=-1)
+        return F.gelu(v) * g
+
+class GEGLUAct(nn.Module):
+    """Drop-in activation: preceding Linear must output 2x width. Returns half width."""
+    def forward(self, x):
+        x, gate = x.chunk(2, dim=-1)
+        return F.gelu(x) * gate
+        
 class mix_3D2D_encoding(nn.Module):
     def __init__(
             self,
@@ -116,453 +130,58 @@ class mix_3D2D_encoding(nn.Module):
         out_i = torch.cat([out_xyz, out_xy, out_xz, out_yz], dim=-1)  # [..., 56]
         return out_i
 
-class SpatialContextModule(nn.Module):
-    """
-    近傍アンカーの空間情報を集約してコンテキストとして利用するモジュール
-    """
-    def __init__(self, k_neighbors=16, feat_dim=48):
-        super().__init__()
-        self.k = k_neighbors
-        # 近傍情報の集約
-        self.neighbor_mlp = nn.Sequential(
-            nn.Linear(feat_dim + 3, feat_dim),  # hash_feat + relative_pos
-            nn.ReLU(),
-            nn.Linear(feat_dim, feat_dim)
-        )
-        # アテンションベースの重み付け
-        self.attention = nn.Sequential(
-            nn.Linear(feat_dim, feat_dim // 4),
-            nn.ReLU(),
-            nn.Linear(feat_dim // 4, 1)
-        )
-
-    def forward(self, anchors, hash_feats):
-        """
-        Args:
-            anchors: [N, 3] アンカー座標
-            hash_feats: [N, feat_dim] ハッシュ特徴
-        Returns:
-            [N, feat_dim] 空間コンテキストが統合されたハッシュ特徴
-        """
-        N = anchors.shape[0]
-
-        # 少数のアンカーの場合はスキップ
-        if N < self.k:
-            return hash_feats
-
-        # K-NN探索（メモリ効率的な実装）
-        # バッチサイズを制限して処理
-        batch_size = 1024  # メモリに応じて調整可能
-        k = min(self.k + 1, N)  # 自分自身を含むため+1
-
-        all_indices = []
-
-        for i in range(0, N, batch_size):
-            end_i = min(i + batch_size, N)
-            batch_anchors = anchors[i:end_i]  # [B, 3]
-
-            # バッチごとに距離計算
-            # [B, N] の距離行列（全体ではなくバッチのみ）
-            dists = torch.cdist(batch_anchors, anchors)  # [B, N]
-
-            # 各点のK近傍を取得
-            _, batch_indices = torch.topk(dists, k=k, largest=False, dim=-1)  # [B, K]
-            all_indices.append(batch_indices)
-
-        # 全バッチの結果を結合
-        indices = torch.cat(all_indices, dim=0)  # [N, K]
-
-        # 自分自身を除外（最も近い点は自分自身のため）
-        indices = indices[:, 1:]  # [N, K-1]
-
-        # 近傍特徴の取得
-        neighbor_feats = hash_feats[indices]  # [N, K-1, feat_dim]
-        relative_pos = anchors.unsqueeze(1) - anchors[indices]  # [N, K-1, 3]
-
-        # 特徴変換
-        combined = torch.cat([neighbor_feats, relative_pos], dim=-1)
-        neighbor_context = self.neighbor_mlp(combined)  # [N, K-1, feat_dim]
-
-        # アテンション重み
-        attn_weights = torch.softmax(
-            self.attention(neighbor_context), dim=1
-        )  # [N, K-1, 1]
-
-        # コンテキスト集約
-        spatial_context = (neighbor_context * attn_weights).sum(dim=1)  # [N, feat_dim]
-
-        # 元のハッシュ特徴と融合（残差接続）
-        return hash_feats + spatial_context
-
-class JointContextModule(nn.Module):
-	def __init__(self, dim_in):
-		super(JointContextModule, self).__init__()
-		# Use Conv1d for coordinate data [N, 3]
-		# Input: coordinates x [N, 3]
-		# Output: context features [N, 384]
-		self.masked = MaskedConv1d("A", in_channels=3, out_channels=48, kernel_size=5, stride=1, padding=2)
-
-		# MLP to combine hash features and context features
-		# Input: hash_feats (dim_in) + context (384) = dim_in + 384
-		# Output: dim_in (same as hash features)
-		self.fusion_mlp = nn.Sequential(
-			nn.Linear(dim_in + 48, 256),
-			nn.ReLU(inplace=True),
-			nn.Linear(256, dim_in)
-		)
-
-	def forward(self, x, hash_feats):
-		# Apply masked conv to coordinates to get context features
-		# x: [N, 3] coordinates
-		context_feats = self.masked(x)  # [N, 384]
-		# Concatenate hash features and context features
-		combined = torch.cat([hash_feats, context_feats], dim=1)  # [N, dim_in + 384]
-		# Pass through MLP to get final features with same dimension as hash_feats
-		output = self.fusion_mlp(combined)  # [N, dim_in]
-		return output
-
-class JointPointNetModule(nn.Module):
-    def __init__(self, dim_in):
-        super(JointPointNetModule, self).__init__()
-        self.pointnet = PointNet(out_dim=48)
-
-        # MLP to combine hash features and context features
-        # Input: hash_feats (dim_in) + context (48) = dim_in + 48
-        # Output: dim_in (same as hash features)
-        self.fusion_mlp = nn.Sequential(
-            nn.Linear(dim_in + 48, 256),
-            nn.ReLU(inplace=True),
-            nn.Linear(256, dim_in)
-        )
-
-    def forward(self, x, hash_feats):
-        # Apply PointNet to coordinates to get context features
-        # x: [N, 3] coordinates
-        context_feats = self.pointnet(x)  # [N, 48]
-        # Concatenate hash features and context features
-        combined = torch.cat([hash_feats, context_feats], dim=1)  # [N, dim_in + 48]
-        # Pass through MLP to get final features with same dimension as hash_feats
-        output = self.fusion_mlp(combined)  # [N, dim_in]
-        return output
-
-
 class Channel_CTX_fea(nn.Module):
-    def __init__(self, use_gated=False):
+    def __init__(self):
         super().__init__()
-        self.use_gated = use_gated
-
-        if use_gated:
-            # Gated MLP (10分割): 出力に gate を追加 (mean, scale, prob, gate の4つ)
-            # 各チャネル5次元
-            self.MLP_d0 = nn.Sequential(
-                nn.Linear(50*3+5*0, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),  # 5*4 = mean(5) + scale(5) + prob(5) + gate(5)
-            )
-            self.MLP_d1 = nn.Sequential(
-                nn.Linear(50*3+5*1, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d2 = nn.Sequential(
-                nn.Linear(50*3+5*2, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d3 = nn.Sequential(
-                nn.Linear(50*3+5*3, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d4 = nn.Sequential(
-                nn.Linear(50*3+5*4, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d5 = nn.Sequential(
-                nn.Linear(50*3+5*5, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d6 = nn.Sequential(
-                nn.Linear(50*3+5*6, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d7 = nn.Sequential(
-                nn.Linear(50*3+5*7, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d8 = nn.Sequential(
-                nn.Linear(50*3+5*8, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*4),
-            )
-            self.MLP_d9 = nn.Sequential(
-                nn.Linear(50*3+5*9, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 5*3),  # 最後のチャネルはgateを出力しない
-            )
-        else:
-            # 元の実装 (5分割)
-            self.MLP_d0 = nn.Sequential(
-                nn.Linear(50*3+10*0, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 10*3),
-            )
-            self.MLP_d1 = nn.Sequential(
-                nn.Linear(50*3+10*1, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 10*3),
-            )
-            self.MLP_d2 = nn.Sequential(
-                nn.Linear(50*3+10*2, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 10*3),
-            )
-            self.MLP_d3 = nn.Sequential(
-                nn.Linear(50*3+10*3, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 10*3),
-            )
-            self.MLP_d4 = nn.Sequential(
-                nn.Linear(50*3+10*4, 20*2),
-                nn.LeakyReLU(inplace=True),
-                nn.Linear(20*2, 10*3),
-            )
+        self.MLP_d0 = nn.Sequential(
+            nn.Linear(50*3+10*0, 20*4),
+            GEGLUAct(),
+            nn.Linear(20*2, 10*3),
+        )
+        self.MLP_d1 = nn.Sequential(
+            nn.Linear(50*3+10*1, 20*4),
+            GEGLUAct(),
+            nn.Linear(20*2, 10*3),
+        )
+        self.MLP_d2 = nn.Sequential(
+            nn.Linear(50*3+10*2, 20*4),
+            GEGLUAct(),
+            nn.Linear(20*2, 10*3),
+        )
+        self.MLP_d3 = nn.Sequential(
+            nn.Linear(50*3+10*3, 20*4),
+            GEGLUAct(),
+            nn.Linear(20*2, 10*3),
+        )
+        self.MLP_d4 = nn.Sequential(
+            nn.Linear(50*3+10*4, 20*4),
+            GEGLUAct(),
+            nn.Linear(20*2, 10*3),
+        )
 
     def forward(self, fea_q, mean_scale, to_dec=-1):  # chctx_v3
         # fea_q: [N, 50]
+        d0, d1, d2, d3, d4 = torch.split(fea_q, split_size_or_sections=[10, 10, 10, 10, 10], dim=-1)
+        mean_d0, scale_d0, prob_d0 = torch.chunk(self.MLP_d0(torch.cat([mean_scale], dim=-1)), chunks=3, dim=-1)
+        mean_d1, scale_d1, prob_d1 = torch.chunk(self.MLP_d1(torch.cat([d0, mean_scale], dim=-1)), chunks=3, dim=-1)
+        mean_d2, scale_d2, prob_d2 = torch.chunk(self.MLP_d2(torch.cat([d0, d1, mean_scale], dim=-1)), chunks=3, dim=-1)
+        mean_d3, scale_d3, prob_d3 = torch.chunk(self.MLP_d3(torch.cat([d0, d1, d2, mean_scale], dim=-1)), chunks=3, dim=-1)
+        mean_d4, scale_d4, prob_d4 = torch.chunk(self.MLP_d4(torch.cat([d0, d1, d2, d3, mean_scale], dim=-1)), chunks=3, dim=-1)
+        mean_adj = torch.cat([mean_d0, mean_d1, mean_d2, mean_d3, mean_d4], dim=-1)
+        scale_adj = torch.cat([scale_d0, scale_d1, scale_d2, scale_d3, scale_d4], dim=-1)
+        prob_adj = torch.cat([prob_d0, prob_d1, prob_d2, prob_d3, prob_d4], dim=-1)
 
-        if self.use_gated:
-            # 10分割: 各5次元
-            d0, d1, d2, d3, d4, d5, d6, d7, d8, d9 = torch.split(fea_q, split_size_or_sections=[5]*10, dim=-1)
-
-            # Gated MLP: gate で情報を選択的に伝播
-            out_d0 = self.MLP_d0(torch.cat([mean_scale], dim=-1))
-            mean_d0, scale_d0, prob_d0, gate_d0 = torch.chunk(out_d0, chunks=4, dim=-1)
-            gate_d0 = torch.sigmoid(gate_d0)
-
-            out_d1 = self.MLP_d1(torch.cat([d0 * gate_d0, mean_scale], dim=-1))
-            mean_d1, scale_d1, prob_d1, gate_d1 = torch.chunk(out_d1, chunks=4, dim=-1)
-            gate_d1 = torch.sigmoid(gate_d1)
-
-            out_d2 = self.MLP_d2(torch.cat([d0 * gate_d0, d1 * gate_d1, mean_scale], dim=-1))
-            mean_d2, scale_d2, prob_d2, gate_d2 = torch.chunk(out_d2, chunks=4, dim=-1)
-            gate_d2 = torch.sigmoid(gate_d2)
-
-            out_d3 = self.MLP_d3(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, mean_scale], dim=-1))
-            mean_d3, scale_d3, prob_d3, gate_d3 = torch.chunk(out_d3, chunks=4, dim=-1)
-            gate_d3 = torch.sigmoid(gate_d3)
-
-            out_d4 = self.MLP_d4(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, mean_scale], dim=-1))
-            mean_d4, scale_d4, prob_d4, gate_d4 = torch.chunk(out_d4, chunks=4, dim=-1)
-            gate_d4 = torch.sigmoid(gate_d4)
-
-            out_d5 = self.MLP_d5(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, mean_scale], dim=-1))
-            mean_d5, scale_d5, prob_d5, gate_d5 = torch.chunk(out_d5, chunks=4, dim=-1)
-            gate_d5 = torch.sigmoid(gate_d5)
-
-            out_d6 = self.MLP_d6(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, mean_scale], dim=-1))
-            mean_d6, scale_d6, prob_d6, gate_d6 = torch.chunk(out_d6, chunks=4, dim=-1)
-            gate_d6 = torch.sigmoid(gate_d6)
-
-            out_d7 = self.MLP_d7(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, d6 * gate_d6, mean_scale], dim=-1))
-            mean_d7, scale_d7, prob_d7, gate_d7 = torch.chunk(out_d7, chunks=4, dim=-1)
-            gate_d7 = torch.sigmoid(gate_d7)
-
-            out_d8 = self.MLP_d8(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, d6 * gate_d6, d7 * gate_d7, mean_scale], dim=-1))
-            mean_d8, scale_d8, prob_d8, gate_d8 = torch.chunk(out_d8, chunks=4, dim=-1)
-            gate_d8 = torch.sigmoid(gate_d8)
-
-            out_d9 = self.MLP_d9(torch.cat([d0 * gate_d0, d1 * gate_d1, d2 * gate_d2, d3 * gate_d3, d4 * gate_d4, d5 * gate_d5, d6 * gate_d6, d7 * gate_d7, d8 * gate_d8, mean_scale], dim=-1))
-            mean_d9, scale_d9, prob_d9 = torch.chunk(out_d9, chunks=3, dim=-1)
-
-            mean_adj = torch.cat([mean_d0, mean_d1, mean_d2, mean_d3, mean_d4, mean_d5, mean_d6, mean_d7, mean_d8, mean_d9], dim=-1)
-            scale_adj = torch.cat([scale_d0, scale_d1, scale_d2, scale_d3, scale_d4, scale_d5, scale_d6, scale_d7, scale_d8, scale_d9], dim=-1)
-            prob_adj = torch.cat([prob_d0, prob_d1, prob_d2, prob_d3, prob_d4, prob_d5, prob_d6, prob_d7, prob_d8, prob_d9], dim=-1)
-
-            if to_dec == 0:
-                return mean_d0, scale_d0, prob_d0
-            if to_dec == 1:
-                return mean_d1, scale_d1, prob_d1
-            if to_dec == 2:
-                return mean_d2, scale_d2, prob_d2
-            if to_dec == 3:
-                return mean_d3, scale_d3, prob_d3
-            if to_dec == 4:
-                return mean_d4, scale_d4, prob_d4
-            if to_dec == 5:
-                return mean_d5, scale_d5, prob_d5
-            if to_dec == 6:
-                return mean_d6, scale_d6, prob_d6
-            if to_dec == 7:
-                return mean_d7, scale_d7, prob_d7
-            if to_dec == 8:
-                return mean_d8, scale_d8, prob_d8
-            if to_dec == 9:
-                return mean_d9, scale_d9, prob_d9
-            return mean_adj, scale_adj, prob_adj
-        else:
-            # 元の実装 (5分割)
-            d0, d1, d2, d3, d4 = torch.split(fea_q, split_size_or_sections=[10, 10, 10, 10, 10], dim=-1)
-            mean_d0, scale_d0, prob_d0 = torch.chunk(self.MLP_d0(torch.cat([mean_scale], dim=-1)), chunks=3, dim=-1)
-            mean_d1, scale_d1, prob_d1 = torch.chunk(self.MLP_d1(torch.cat([d0, mean_scale], dim=-1)), chunks=3, dim=-1)
-            mean_d2, scale_d2, prob_d2 = torch.chunk(self.MLP_d2(torch.cat([d0, d1, mean_scale], dim=-1)), chunks=3, dim=-1)
-            mean_d3, scale_d3, prob_d3 = torch.chunk(self.MLP_d3(torch.cat([d0, d1, d2, mean_scale], dim=-1)), chunks=3, dim=-1)
-            mean_d4, scale_d4, prob_d4 = torch.chunk(self.MLP_d4(torch.cat([d0, d1, d2, d3, mean_scale], dim=-1)), chunks=3, dim=-1)
-
-            mean_adj = torch.cat([mean_d0, mean_d1, mean_d2, mean_d3, mean_d4], dim=-1)
-            scale_adj = torch.cat([scale_d0, scale_d1, scale_d2, scale_d3, scale_d4], dim=-1)
-            prob_adj = torch.cat([prob_d0, prob_d1, prob_d2, prob_d3, prob_d4], dim=-1)
-
-            if to_dec == 0:
-                return mean_d0, scale_d0, prob_d0
-            if to_dec == 1:
-                return mean_d1, scale_d1, prob_d1
-            if to_dec == 2:
-                return mean_d2, scale_d2, prob_d2
-            if to_dec == 3:
-                return mean_d3, scale_d3, prob_d3
-            if to_dec == 4:
-                return mean_d4, scale_d4, prob_d4
-            return mean_adj, scale_adj, prob_adj
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-
-# class Channel_CTX_fea(nn.Module):
-#     """
-#     Transformer版 Channel Context モジュール
-
-#     fea_q: [N, 50]  -> 10トークン (各5次元)
-#     mean_scale: [N, 150] (たぶん 50*3)
-
-#     use_gated:
-#       - False: 各トークンごとに mean(5), scale(5), prob(5) の 15次元
-#       - True : 各トークンごとに mean(5), scale(5), prob(5), gate(5) の 20次元
-#                （最後の to_dec=9 ケースでも gate まで出しておく）
-
-#     Transformer で 10チャネル分を一気に処理して、
-#     最後に [N, 10, 5] -> [N, 50] に reshape して返す。
-#     """
-
-#     def __init__(
-#         self,
-#         use_gated: bool = False,
-#         d_model: int = 64,
-#         nhead: int = 4,
-#         num_layers: int = 2,
-#         dim_feedforward: int = 256,
-#         dropout: float = 0.0,
-#     ):
-#         super().__init__()
-#         self.use_gated = use_gated
-#         self.d_model = d_model
-
-#         # fea_q を 5次元 → d_model に写像
-#         self.fea_embed = nn.Linear(5, d_model)
-
-#         # mean_scale (たぶん 150次元) を d_model に圧縮して、全トークンに足し込む
-#         self.cond_proj = nn.Linear(50 * 3, d_model)
-
-#         # 位置埋め込み (10トークン固定想定)
-#         self.pos_embed = nn.Parameter(torch.zeros(1, 10, d_model))
-#         nn.init.normal_(self.pos_embed, mean=0.0, std=0.02)
-
-#         # Transformer Encoder
-#         encoder_layer = nn.TransformerEncoderLayer(
-#             d_model=d_model,
-#             nhead=nhead,
-#             dim_feedforward=dim_feedforward,
-#             dropout=dropout,
-#             activation="gelu",
-#             batch_first=True,  # [B, L, D] 形式を使う
-#         )
-#         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-#         # 出力ヘッド
-#         if use_gated:
-#             out_dim = 5 * 4  # mean, scale, prob, gate
-#         else:
-#             out_dim = 5 * 3  # mean, scale, prob
-
-#         self.out_proj = nn.Linear(d_model, out_dim)
-
-#     def forward(self, fea_q: torch.Tensor, mean_scale: torch.Tensor, to_dec: int = -1):
-#         """
-#         fea_q: [N, 50]
-#         mean_scale: [N, 150] (想定)
-#         to_dec:
-#           - -1 のとき: 全チャネル分 [N, 50] を返す
-#           - 0〜9 のとき: 対応するチャネルだけ [N, 5] を返す
-#         """
-#         B, C = fea_q.shape
-#         assert C == 50, f"fea_q のチャネル数が想定(50)と違う: {C}"
-
-#         # 10トークン × 5次元に分割: [N, 50] -> [N, 10, 5]
-#         fea_seq = fea_q.view(B, 10, 5)
-
-#         # 入力埋め込み
-#         x = self.fea_embed(fea_seq)  # [N, 10, d_model]
-
-#         # コンディション (mean_scale) を全トークンにブロードキャストして加算
-#         assert mean_scale.dim() == 2, "mean_scale は [N, 150] の2次元テンソルを想定"
-#         cond = self.cond_proj(mean_scale)  # [N, d_model]
-#         cond = cond.unsqueeze(1)  # [N, 1, d_model]
-#         x = x + cond + self.pos_embed  # [N, 10, d_model]
-
-#         # Transformer Encoder
-#         # ※ ここでは因果マスク無し（全チャネル双方向注意）にしている。
-#         #   ARな条件付き分布を厳密に守りたければ causal mask を入れる必要あり。
-#         x = self.encoder(x)  # [N, 10, d_model]
-
-#         # 出力: [N, 10, out_dim]
-#         out = self.out_proj(x)
-
-#         if self.use_gated:
-#             # [N, 10, 20] -> 各 5次元に分割
-#             mean, scale, prob, gate = torch.chunk(out, chunks=4, dim=-1)
-#             gate = torch.sigmoid(gate)
-
-#             # to_dec 指定がある場合は、そのチャネルのみを返す
-#             if 0 <= to_dec <= 9:
-#                 # [N, 5] を返す
-#                 return (
-#                     mean[:, to_dec, :],
-#                     scale[:, to_dec, :],
-#                     prob[:, to_dec, :],
-#                     gate[:, to_dec, :],
-#                 )
-
-#             # 全チャネルまとめて [N, 50] で返す
-#             mean_adj = mean.reshape(B, -1)   # [N, 50]
-#             scale_adj = scale.reshape(B, -1) # [N, 50]
-#             prob_adj = prob.reshape(B, -1)   # [N, 50]
-
-#             return mean_adj, scale_adj, prob_adj, gate.reshape(B, -1)
-
-#         else:
-#             # [N, 10, 15] -> 各 5次元に分割
-#             mean, scale, prob = torch.chunk(out, chunks=3, dim=-1)
-
-#             if 0 <= to_dec <= 9:
-#                 return (
-#                     mean[:, to_dec, :],
-#                     scale[:, to_dec, :],
-#                     prob[:, to_dec, :],
-#                 )
-
-#             mean_adj = mean.reshape(B, -1)   # [N, 50]
-#             scale_adj = scale.reshape(B, -1) # [N, 50]
-#             prob_adj = prob.reshape(B, -1)   # [N, 50]
-
-#             return mean_adj, scale_adj, prob_adj
-
-
+        if to_dec == 0:
+            return mean_d0, scale_d0, prob_d0
+        if to_dec == 1:
+            return mean_d1, scale_d1, prob_d1
+        if to_dec == 2:
+            return mean_d2, scale_d2, prob_d2
+        if to_dec == 3:
+            return mean_d3, scale_d3, prob_d3
+        if to_dec == 4:
+            return mean_d4, scale_d4, prob_d4
+        return mean_adj, scale_adj, prob_adj
 
 class Channel_CTX_fea_tiny(nn.Module):
     def __init__(self):
@@ -571,23 +190,23 @@ class Channel_CTX_fea_tiny(nn.Module):
         self.scale_d0 = nn.Parameter(torch.zeros(size=[1, 10]))
         self.prob_d0 = nn.Parameter(torch.zeros(size=[1, 10]))
         self.MLP_d1 = nn.Sequential(
-            nn.Linear(10*1, 10*3),
-            nn.LeakyReLU(inplace=True),
+            nn.Linear(10*1, 10*6),
+            GEGLUAct(),
             nn.Linear(10*3, 10*3),
         )
         self.MLP_d2 = nn.Sequential(
-            nn.Linear(10*2, 10*3),
-            nn.LeakyReLU(inplace=True),
+            nn.Linear(10*2, 10*6),
+            GEGLUAct(),
             nn.Linear(10*3, 10*3),
         )
         self.MLP_d3 = nn.Sequential(
-            nn.Linear(10*3, 10*3),
-            nn.LeakyReLU(inplace=True),
+            nn.Linear(10*3, 10*6),
+            GEGLUAct(),
             nn.Linear(10*3, 10*3),
         )
         self.MLP_d4 = nn.Sequential(
-            nn.Linear(10*4, 10*3),
-            nn.LeakyReLU(inplace=True),
+            nn.Linear(10*4, 10*6),
+            GEGLUAct(),
             nn.Linear(10*3, 10*3),
         )
 
@@ -615,6 +234,169 @@ class Channel_CTX_fea_tiny(nn.Module):
         if to_dec == 4:
             return mean_d4, scale_d4, prob_d4
         return mean_adj, scale_adj, prob_adj
+
+class CausalKNNContext(nn.Module):
+    """Morton順ソート済みアンカー列に対して因果的K近傍集約を行う。
+
+    改善点:
+    - クロスチャンク lookback: 前チャンクの直近 max_lookback 件も参照
+    - 学習可能温度: log_temperature パラメータで距離重みを適応的に調整
+    """
+    def __init__(self, hash_dim: int, K: int = 16, temperature: float = 1.0,
+                 max_lookback: int = 3000):
+        super().__init__()
+        self.K = K
+        self.max_lookback = max_lookback
+        # exp(log_temperature) で常に正、初期値 = temperature
+        self.log_temperature = nn.Parameter(
+            torch.tensor(math.log(temperature), dtype=torch.float32))
+        # hash_feats を正規化してから correction を計算（学習安定化）
+        self.norm = nn.LayerNorm(hash_dim)
+        # 残差補正: 2層 + LayerNorm + GELU で高い表現力を確保
+        self.correction = nn.Sequential(
+            nn.Linear(hash_dim * 2, hash_dim * 4),
+            nn.LayerNorm(hash_dim * 4),
+            GEGLUAct(),
+            nn.Linear(hash_dim * 2, hash_dim),
+        )
+
+    def _get_temp(self) -> torch.Tensor:
+        return self.log_temperature.exp().clamp(min=1e-2, max=10.0)
+
+    def _aggregate(self, query_pos: torch.Tensor, key_pos: torch.Tensor,
+                   key_feats: torch.Tensor) -> torch.Tensor:
+        """query_pos の各点に対して key_pos の中から K近傍を温度付き softmax で集約。"""
+        M = key_pos.shape[0]
+        if M == 0:
+            return torch.zeros(query_pos.shape[0], key_feats.shape[-1],
+                               device=query_pos.device)
+        K_eff = min(self.K, M)
+        temp = self._get_temp()
+        dists = torch.cdist(query_pos, key_pos)                          # [C, M]
+        topk_dists, topk_idx = dists.topk(K_eff, largest=False, dim=-1) # [C, K]
+        w = torch.softmax(-topk_dists / temp, dim=-1)                   # [C, K]
+        return (key_feats[topk_idx] * w.unsqueeze(-1)).sum(1)           # [C, D]
+
+    def _aggregate_causal(self, hash_feats: torch.Tensor, anchor_pos: torch.Tensor,
+                          chunk_size: int) -> torch.Tensor:
+        """クロスチャンク lookback + チャンク内因果集約。fusion は適用しない。"""
+        N, D = hash_feats.shape
+        causal_ctx = torch.zeros_like(hash_feats)
+        temp = self._get_temp()
+
+        for s in range(0, N, chunk_size):
+            e = min(s + chunk_size, N)
+            C = e - s
+            chunk_pos   = anchor_pos[s:e]
+            chunk_feats = hash_feats[s:e]
+
+            # ── クロスチャンク: 直近 max_lookback 件から集約 ──
+            if s > 0:
+                prev_start = max(0, s - self.max_lookback)
+                ctx_prev = self._aggregate(
+                    chunk_pos,
+                    anchor_pos[prev_start:s],
+                    hash_feats[prev_start:s],
+                )  # [C, D]
+            else:
+                ctx_prev = torch.zeros(C, D, device=hash_feats.device)
+
+            # ── チャンク内因果集約 (上三角マスクで自分より後ろを除外) ──
+            if C > 1:
+                dists = torch.cdist(chunk_pos, chunk_pos)  # [C, C]
+                causal_mask = torch.triu(
+                    torch.ones(C, C, dtype=torch.bool, device=hash_feats.device),
+                    diagonal=0)
+                dists = dists.masked_fill(causal_mask, float('inf'))
+                K_eff = min(self.K, C - 1)
+                topk_dists, topk_idx = dists.topk(K_eff, largest=False, dim=-1)
+                valid = topk_dists < 1e9
+                w = torch.where(
+                    valid,
+                    torch.softmax(
+                        torch.where(valid, -topk_dists / temp,
+                                    torch.full_like(topk_dists, -1e9)), dim=-1),
+                    torch.zeros_like(topk_dists))
+                ctx_intra = (chunk_feats[topk_idx] * w.unsqueeze(-1)).sum(1)
+            else:
+                ctx_intra = torch.zeros(C, D, device=hash_feats.device)
+
+            # クロスチャンクとチャンク内を平均
+            has_prev  = s > 0
+            has_intra = C > 1
+            if has_prev and has_intra:
+                causal_ctx[s:e] = (ctx_prev + ctx_intra) / 2
+            elif has_prev:
+                causal_ctx[s:e] = ctx_prev
+            else:
+                causal_ctx[s:e] = ctx_intra
+
+        return causal_ctx
+
+    def apply_fusion(self, hash_feats: torch.Tensor, causal_ctx: torch.Tensor) -> torch.Tensor:
+        """残差 + correction で hash_feats を精製する。renderer から直接呼ばれる。
+        output = hash_feats + correction(cat([norm(hash_feats), causal_ctx]))
+        """
+        return hash_feats + self.correction(
+            torch.cat([self.norm(hash_feats), causal_ctx], dim=-1))
+
+    def aggregate_only(self, hash_feats: torch.Tensor, anchor_pos: torch.Tensor,
+                       chunk_size: int = 3000) -> torch.Tensor:
+        """Fusion を適用せず causal aggregation のみ行う（renderer から呼ばれる）。"""
+        return self._aggregate_causal(hash_feats, anchor_pos, chunk_size)
+
+    def forward(self, hash_feats: torch.Tensor, anchor_pos: torch.Tensor,
+                chunk_size: int = 3000) -> torch.Tensor:
+        """hash_feats / anchor_pos は Morton 順ソート済みであること。"""
+        causal_ctx = self._aggregate_causal(hash_feats, anchor_pos, chunk_size)
+        return self.apply_fusion(hash_feats, causal_ctx)
+
+
+class AnchorCondNorm(nn.Module):
+    """Three-stage FiLM normalization conditioned on anchor scale, offset, and feature.
+    各ステージは対応する入力が None のときスキップされる。
+
+    Stage 1 (scale):  h1  = (1 + γ_s) * LayerNorm(x)  + β_s   (anchor_scale が None なら恒等)
+    Stage 2 (offset): h2  = (1 + γ_o) * LayerNorm(h1) + β_o   (anchor_offset が None なら恒等)
+    Stage 3 (feat):   out = (1 + γ_f) * LayerNorm(h2) + β_f   (anchor_feat が None なら恒等)
+    """
+    def __init__(self, feat_dim: int, scale_cond_dim: int, offset_cond_dim: int, anchor_feat_dim: int):
+        super().__init__()
+        self.norm_scale = nn.LayerNorm(feat_dim, elementwise_affine=False)
+        self.norm_offset = nn.LayerNorm(feat_dim, elementwise_affine=False)
+        self.norm_feat = nn.LayerNorm(feat_dim, elementwise_affine=False)
+        self.scale_proj = nn.Sequential(
+            nn.Linear(scale_cond_dim, feat_dim * 2),
+            GEGLUAct(),
+            nn.Linear(feat_dim, feat_dim * 2),
+        )
+        self.offset_proj = nn.Sequential(
+            nn.Linear(offset_cond_dim, feat_dim * 2),
+            GEGLUAct(),
+            nn.Linear(feat_dim, feat_dim * 2),
+        )
+        self.feat_proj = nn.Sequential(
+            nn.Linear(anchor_feat_dim, feat_dim * 2),
+            GEGLUAct(),
+            nn.Linear(feat_dim, feat_dim * 2),
+        )
+
+    def forward(self, x: torch.Tensor,
+                anchor_scale: torch.Tensor = None,
+                anchor_offset_flat: torch.Tensor = None,
+                anchor_feat: torch.Tensor = None) -> torch.Tensor:
+        h = x
+        if anchor_scale is not None:
+            gamma_s, beta_s = self.scale_proj(anchor_scale).chunk(2, dim=-1)
+            h = (1 + gamma_s) * self.norm_scale(h) + beta_s
+        if anchor_offset_flat is not None:
+            gamma_o, beta_o = self.offset_proj(anchor_offset_flat).chunk(2, dim=-1)
+            h = (1 + gamma_o) * self.norm_offset(h) + beta_o
+        if anchor_feat is not None:
+            gamma_f, beta_f = self.feat_proj(anchor_feat).chunk(2, dim=-1)
+            h = (1 + gamma_f) * self.norm_feat(h) + beta_f
+        return h
+
 
 class GaussianModel(nn.Module):
 
@@ -655,6 +437,10 @@ class GaussianModel(nn.Module):
                  use_gated_mlp: bool=False,
                  use_spatial_context: bool=False,
                  use_joint_context: bool=False,
+                 use_anchor_cond_norm: bool=False,
+                 use_causal_knn: bool=False,
+                 use_reno: bool=False,
+                 reno_ckpt_path: str='/workspace/RENO/model/Ford/ckpt.pt',
                  ):
         super().__init__()
         print('hash_params:', use_2D, n_features_per_level,
@@ -682,8 +468,13 @@ class GaussianModel(nn.Module):
         self.Q = Q
         self.use_2D = use_2D
         self.decoded_version = decoded_version
+        self.use_gated_mlp = use_gated_mlp
         self.use_spatial_context = use_spatial_context
         self.use_joint_context = use_joint_context
+        self.use_anchor_cond_norm = use_anchor_cond_norm
+        self.use_causal_knn = use_causal_knn
+        self.use_reno = use_reno
+        self.reno_ckpt_path = reno_ckpt_path
 
         self._anchor = torch.empty(0)
         self._offset = torch.empty(0)
@@ -740,8 +531,8 @@ class GaussianModel(nn.Module):
 
         if self.use_feat_bank:
             self.mlp_feature_bank = nn.Sequential(
-                nn.Linear(3+1, feat_dim),
-                nn.ReLU(True),
+                nn.Linear(3+1, feat_dim*2),
+                GEGLUAct(),
                 nn.Linear(feat_dim, 3),
                 nn.Softmax(dim=1)
             ).cuda()
@@ -749,63 +540,58 @@ class GaussianModel(nn.Module):
         mlp_input_feat_dim = feat_dim
 
         self.mlp_opacity = nn.Sequential(
-            nn.Linear(mlp_input_feat_dim+3+1, feat_dim),
-            nn.ReLU(True),
+            nn.Linear(mlp_input_feat_dim+3+1, feat_dim*2),
+            GEGLUAct(),
             nn.Linear(feat_dim, n_offsets),
             nn.Tanh()
         ).cuda()
 
         self.mlp_cov = nn.Sequential(
-            nn.Linear(mlp_input_feat_dim+3+1, feat_dim),
-            nn.ReLU(True),
+            nn.Linear(mlp_input_feat_dim+3+1, feat_dim*2),
+            GEGLUAct(),
             nn.Linear(feat_dim, 7*self.n_offsets),
-            # nn.Linear(feat_dim, 7),
         ).cuda()
 
         self.mlp_color = nn.Sequential(
-            nn.Linear(mlp_input_feat_dim+3+1, feat_dim),
-            nn.ReLU(True),
+            nn.Linear(mlp_input_feat_dim+3+1, feat_dim*2),
+            GEGLUAct(),
             nn.Linear(feat_dim, 3*self.n_offsets),
             nn.Sigmoid()
         ).cuda()
-        # ここでガウス分布パラメータを予測
+
         self.mlp_grid = nn.Sequential(
-            nn.Linear(self.encoding_xyz.output_dim, feat_dim*2),
-            nn.ReLU(True),
+            nn.Linear(self.encoding_xyz.output_dim, feat_dim*4),
+            GEGLUAct(),
+            nn.Linear(feat_dim*2, feat_dim*4),
+            GEGLUAct(),
             nn.Linear(feat_dim*2, (feat_dim+6+3*self.n_offsets)*2+feat_dim+1+1+1),
         ).cuda()
 
         if not is_synthetic_nerf:
-            self.mlp_deform = Channel_CTX_fea(use_gated=use_gated_mlp).cuda()
-            if use_gated_mlp:
-                print('Using Gated MLP for Channel Context')
+            self.mlp_deform = Channel_CTX_fea().cuda()
         else:
             print('find synthetic nerf, use Channel_CTX_fea_tiny')
             self.mlp_deform = Channel_CTX_fea_tiny().cuda()
 
+        if use_anchor_cond_norm:
+            self.anchor_cond_norm = AnchorCondNorm(
+                feat_dim=self.encoding_xyz.output_dim,
+                scale_cond_dim=6,
+                offset_cond_dim=self.n_offsets * 3,
+                anchor_feat_dim=feat_dim,
+            ).cuda()
+
+        if use_causal_knn:
+            self.causal_knn = CausalKNNContext(
+                hash_dim=self.encoding_xyz.output_dim,
+                K=16,
+                temperature=1.0,
+                max_lookback=3000,
+            ).cuda()
+
         self.entropy_gaussian = Entropy_gaussian(Q=1).cuda()
         self.EG_mix_prob_2 = Entropy_gaussian_mix_prob_2(Q=1).cuda()
 
-        # 空間コンテキストモジュールの初期化
-        if self.use_spatial_context:
-            self.spatial_context_module = SpatialContextModule(
-                k_neighbors=16,
-                feat_dim=self.encoding_xyz.output_dim
-            ).cuda()
-            print('Using Spatial Context Module for hash features')
-
-        # ジョイントコンテキストモジュールの初期化
-        print("ジョイントコンテキスト起動してくれ")
-        if self.use_joint_context:
-            # # Use the actual output dimension from encoding_xyz
-            # encoding_output_dim = self.encoding_xyz.output_dim
-            # self.joint_context_module = JointContextModule(encoding_output_dim).cuda()
-            # print(f'Using Joint Context Module for joint features (dim={encoding_output_dim})')
-            # Use the actual output dimension from encoding_xyz
-            encoding_output_dim = self.encoding_xyz.output_dim
-            self.joint_context_module = JointPointNetModule(encoding_output_dim).cuda()
-            print(f'PointNetモジュール使用中(dim={encoding_output_dim})')
-        print("ジョイントコンテキスト起動してくれた?")
     def get_encoding_params(self):
         params = []
         if self.use_2D:
@@ -834,9 +620,13 @@ class GaussianModel(nn.Module):
         self.encoding_xyz.eval()
         self.mlp_grid.eval()
         self.mlp_deform.eval()
+        if self.use_causal_knn:
+            self.causal_knn.eval()
 
         if self.use_feat_bank:
             self.mlp_feature_bank.eval()
+        if self.use_anchor_cond_norm:
+            self.anchor_cond_norm.eval()
 
     def train(self):
         self.mlp_opacity.train()
@@ -845,9 +635,13 @@ class GaussianModel(nn.Module):
         self.encoding_xyz.train()
         self.mlp_grid.train()
         self.mlp_deform.train()
+        if self.use_causal_knn:
+            self.causal_knn.train()
 
         if self.use_feat_bank:
             self.mlp_feature_bank.train()
+        if self.use_anchor_cond_norm:
+            self.anchor_cond_norm.train()
 
     def capture(self):
         return (
@@ -947,35 +741,30 @@ class GaussianModel(nn.Module):
         self.x_bound_max = x_bound_max
         print('anchor_bound_updated')
 
-    def calc_interp_feat(self, x):
+    def forward_grid(self, feat_context):
+        y = self.mlp_grid(feat_context)
+        return torch.split(
+            y,
+            [self.feat_dim, self.feat_dim, self.feat_dim,
+             6, 6,
+             3 * self.n_offsets, 3 * self.n_offsets,
+             1, 1, 1],
+            dim=-1,
+        )
+
+    def calc_interp_feat(self, x, anchor_scale=None, anchor_offset=None, anchor_feat=None):
         # x: [N, 3]
         assert len(x.shape) == 2 and x.shape[1] == 3
         assert torch.abs(self.x_bound_min - torch.zeros(size=[1, 3], device='cuda')).mean() > 0
-
-        # 正規化前のアンカー座標を保存（空間コンテキスト用）
-        x_orig = x.clone()  # if self.use_spatial_context else None
-
         x = (x - self.x_bound_min) / (self.x_bound_max - self.x_bound_min)  # to [0, 1]
-        features = self.encoding_xyz(x)  # [N, 4*12]
-
-        # 空間コンテキストモジュールを適用
-        if self.use_spatial_context:
-            features = self.spatial_context_module(x_orig, features)
-        
-        # Jointモデルの自己回帰モジュール適用
-        # アンカー座標に対してContextPredictionを適用するイメージ 
-        '''
-        class ContextPrediction(nn.Module):
-            def __init__(self, dim_in):
-                super(ContextPrediction, self).__init__()
-                self.masked = MaskedConv2d("A", in_channels=dim_in, out_channels=384, kernel_size=5, stride=1, padding=2)
-            
-            def forward(self, x):
-                return self.masked(x)
-        '''
-        if self.use_joint_context:
-            features = self.joint_context_module(x_orig, features)
-        
+        features = self.encoding_xyz(x)  # [N, D_hash]
+        if self.use_anchor_cond_norm and (anchor_scale is not None or anchor_offset is not None or anchor_feat is not None):
+            features = self.anchor_cond_norm(
+                features,
+                anchor_scale,
+                anchor_offset.reshape(anchor_offset.shape[0], -1) if anchor_offset is not None else None,
+                anchor_feat,
+            )
         return features
 
     @property
@@ -1048,16 +837,11 @@ class GaussianModel(nn.Module):
         self.offset_denom = torch.zeros((self.get_anchor.shape[0]*self.n_offsets, 1), device="cuda")
         self.anchor_demon = torch.zeros((self.get_anchor.shape[0], 1), device="cuda")
 
-        # マスクの学習率を決定（freeze_maskがTrueの場合は0に設定）
-        mask_lr = 0.0 if training_args.freeze_mask else training_args.mask_lr_init * self.spatial_lr_scale
-        if training_args.freeze_mask:
-            print("Mask learning is FROZEN (learning rate = 0.0)")
-
         if self.use_feat_bank:
             l = [
                 {'params': [self._anchor], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "anchor"},
                 {'params': [self._offset], 'lr': training_args.offset_lr_init * self.spatial_lr_scale, "name": "offset"},
-                {'params': [self._mask], 'lr': mask_lr, "name": "mask"},
+                {'params': [self._mask], 'lr': training_args.mask_lr_init * self.spatial_lr_scale, "name": "mask"},
                 {'params': [self._anchor_feat], 'lr': training_args.feature_lr, "name": "anchor_feat"},
                 {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
                 {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
@@ -1072,11 +856,15 @@ class GaussianModel(nn.Module):
                 {'params': self.mlp_grid.parameters(), 'lr': training_args.mlp_grid_lr_init, "name": "mlp_grid"},
                 {'params': self.mlp_deform.parameters(), 'lr': training_args.mlp_deform_lr_init, "name": "mlp_deform"},
             ]
+            if self.use_causal_knn:
+                l.append({'params': self.causal_knn.parameters(), 'lr': training_args.causal_knn_lr_init, "name": "causal_knn"})
+            if self.use_anchor_cond_norm:
+                l.append({'params': self.anchor_cond_norm.parameters(), 'lr': training_args.mlp_grid_lr_init, "name": "anchor_cond_norm"})
         else:
             l = [
                 {'params': [self._anchor], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "anchor"},
                 {'params': [self._offset], 'lr': training_args.offset_lr_init * self.spatial_lr_scale, "name": "offset"},
-                {'params': [self._mask], 'lr': mask_lr, "name": "mask"},
+                {'params': [self._mask], 'lr': training_args.mask_lr_init * self.spatial_lr_scale, "name": "mask"},
                 {'params': [self._anchor_feat], 'lr': training_args.feature_lr, "name": "anchor_feat"},
                 {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
                 {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
@@ -1090,6 +878,10 @@ class GaussianModel(nn.Module):
                 {'params': self.mlp_grid.parameters(), 'lr': training_args.mlp_grid_lr_init, "name": "mlp_grid"},
                 {'params': self.mlp_deform.parameters(), 'lr': training_args.mlp_deform_lr_init, "name": "mlp_deform"},
             ]
+            if self.use_causal_knn:
+                l.append({'params': self.causal_knn.parameters(), 'lr': training_args.causal_knn_lr_init, "name": "causal_knn"})
+            if self.use_anchor_cond_norm:
+                l.append({'params': self.anchor_cond_norm.parameters(), 'lr': training_args.mlp_grid_lr_init, "name": "anchor_cond_norm"})
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
         self.anchor_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
@@ -1100,14 +892,10 @@ class GaussianModel(nn.Module):
                                                     lr_final=training_args.offset_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.offset_lr_delay_mult,
                                                     max_steps=training_args.offset_lr_max_steps)
-        # マスクスケジューラー（freeze_maskがTrueの場合は常に0を返す）
-        if training_args.freeze_mask:
-            self.mask_scheduler_args = lambda x: 0.0
-        else:
-            self.mask_scheduler_args = get_expon_lr_func(lr_init=training_args.mask_lr_init*self.spatial_lr_scale,
-                                                        lr_final=training_args.mask_lr_final*self.spatial_lr_scale,
-                                                        lr_delay_mult=training_args.mask_lr_delay_mult,
-                                                        max_steps=training_args.mask_lr_max_steps)
+        self.mask_scheduler_args = get_expon_lr_func(lr_init=training_args.mask_lr_init*self.spatial_lr_scale,
+                                                    lr_final=training_args.mask_lr_final*self.spatial_lr_scale,
+                                                    lr_delay_mult=training_args.mask_lr_delay_mult,
+                                                    max_steps=training_args.mask_lr_max_steps)
 
         self.mlp_opacity_scheduler_args = get_expon_lr_func(lr_init=training_args.mlp_opacity_lr_init,
                                                     lr_final=training_args.mlp_opacity_lr_final,
@@ -1146,6 +934,11 @@ class GaussianModel(nn.Module):
                                                     lr_final=training_args.mlp_deform_lr_final,
                                                     lr_delay_mult=training_args.mlp_deform_lr_delay_mult,
                                                     max_steps=training_args.mlp_deform_lr_max_steps)
+        if self.use_causal_knn:
+            self.causal_knn_scheduler_args = get_expon_lr_func(lr_init=training_args.causal_knn_lr_init,
+                                                        lr_final=training_args.causal_knn_lr_final,
+                                                        lr_delay_mult=training_args.causal_knn_lr_delay_mult,
+                                                        max_steps=training_args.causal_knn_lr_max_steps)
 
     def update_learning_rate(self, iteration):
         ''' Learning rate scheduling per step '''
@@ -1179,6 +972,9 @@ class GaussianModel(nn.Module):
                 param_group['lr'] = lr
             if param_group["name"] == "mlp_deform":
                 lr = self.mlp_deform_scheduler_args(iteration)
+                param_group['lr'] = lr
+            if self.use_causal_knn and param_group["name"] == "causal_knn":
+                lr = self.causal_knn_scheduler_args(iteration)
                 param_group['lr'] = lr
 
     def construct_list_of_attributes(self):
@@ -1289,9 +1085,8 @@ class GaussianModel(nn.Module):
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
-            if 'mlp' in group['name'] or 'conv' in group['name'] or 'feat_base' in group['name'] or 'encoding' in group['name']:
+            if 'mlp' in group['name'] or 'conv' in group['name'] or 'feat_base' in group['name'] or 'encoding' in group['name'] or len(group["params"]) != 1:
                 continue
-            assert len(group["params"]) == 1
             extension_tensor = tensors_dict[group["name"]]
             stored_state = self.optimizer.state.get(group['params'][0], None)
             if stored_state is not None:  # Only for opacity, rotation. But seems they two are useless?
@@ -1331,7 +1126,7 @@ class GaussianModel(nn.Module):
     def _prune_anchor_optimizer(self, mask):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
-            if 'mlp' in group['name'] or 'conv' in group['name'] or 'feat_base' in group['name'] or 'encoding' in group['name']:
+            if 'mlp' in group['name'] or 'conv' in group['name'] or 'feat_base' in group['name'] or 'encoding' in group['name'] or len(group["params"]) != 1:
                 continue
 
             stored_state = self.optimizer.state.get(group['params'][0], None)
@@ -1524,25 +1319,21 @@ class GaussianModel(nn.Module):
     def save_mlp_checkpoints(self,path):
         mkdir_p(os.path.dirname(path))
 
+        ckpt = {
+            'opacity_mlp': self.mlp_opacity.state_dict(),
+            'cov_mlp': self.mlp_cov.state_dict(),
+            'color_mlp': self.mlp_color.state_dict(),
+            'encoding_xyz': self.encoding_xyz.state_dict(),
+            'grid_mlp': self.mlp_grid.state_dict(),
+            'deform_mlp': self.mlp_deform.state_dict(),
+        }
+        if self.use_causal_knn:
+            ckpt['causal_knn'] = self.causal_knn.state_dict()
         if self.use_feat_bank:
-            torch.save({
-                'opacity_mlp': self.mlp_opacity.state_dict(),
-                'mlp_feature_bank': self.mlp_feature_bank.state_dict(),
-                'cov_mlp': self.mlp_cov.state_dict(),
-                'color_mlp': self.mlp_color.state_dict(),
-                'encoding_xyz': self.encoding_xyz.state_dict(),
-                'grid_mlp': self.mlp_grid.state_dict(),
-                'deform_mlp': self.mlp_deform.state_dict(),
-            }, path)
-        else:
-            torch.save({
-                'opacity_mlp': self.mlp_opacity.state_dict(),
-                'cov_mlp': self.mlp_cov.state_dict(),
-                'color_mlp': self.mlp_color.state_dict(),
-                'encoding_xyz': self.encoding_xyz.state_dict(),
-                'grid_mlp': self.mlp_grid.state_dict(),
-                'deform_mlp': self.mlp_deform.state_dict(),
-            }, path)
+            ckpt['mlp_feature_bank'] = self.mlp_feature_bank.state_dict()
+        if self.use_anchor_cond_norm:
+            ckpt['anchor_cond_norm'] = self.anchor_cond_norm.state_dict()
+        torch.save(ckpt, path)
 
 
     def load_mlp_checkpoints(self,path):
@@ -1555,6 +1346,10 @@ class GaussianModel(nn.Module):
         self.encoding_xyz.load_state_dict(checkpoint['encoding_xyz'])
         self.mlp_grid.load_state_dict(checkpoint['grid_mlp'])
         self.mlp_deform.load_state_dict(checkpoint['deform_mlp'])
+        if self.use_causal_knn and 'causal_knn' in checkpoint:
+            self.causal_knn.load_state_dict(checkpoint['causal_knn'])
+        if self.use_anchor_cond_norm and 'anchor_cond_norm' in checkpoint:
+            self.anchor_cond_norm.load_state_dict(checkpoint['anchor_cond_norm'])
 
     def contract_to_unisphere(self,
         x: torch.Tensor,
@@ -1583,205 +1378,13 @@ class GaussianModel(nn.Module):
             x = x / 4 + 0.5  # [-inf, inf] is at [0, 1]
             return x
 
-    def build_level2_from_level1(self, voxel_size_L2: float):
-        """
-        Level1アンカー群からLevel2アンカーを生成する（モーメントマッチング）
-
-        Level1の各アンカーを3Dガウシアンとみなし、voxel_size_L2でグループ化。
-        各グループをガウシアン混合として扱い、モーメントマッチングで
-        1つのガウシアンに近似してLevel2アンカーを生成する。
-
-        Args:
-            voxel_size_L2 (float): Level2のボクセルサイズ
-
-        Returns:
-            tuple: (anchor_L2, scaling_L2, rotation_L2, feat_L2, offset_L2, mask_L2)
-                anchor_L2:   [N2, 3]      Level2アンカー位置
-                scaling_L2:  [N2, 6]      Level2スケーリング（log space）
-                rotation_L2: [N2, 4]      Level2回転（quaternion）
-                feat_L2:     [N2, feat_dim] Level2特徴
-                offset_L2:   [N2, n_offsets, 3] Level2オフセット
-                mask_L2:     [N2, n_offsets+1, 1] Level2マスク
-        """
-        device = self.get_anchor.device
-
-        # Level1のアンカー情報を取得
-        anchors_L1 = self.get_anchor  # [N1, 3]
-        scaling_L1 = self.get_scaling  # [N1, 6]
-        rotation_L1 = self.get_rotation  # [N1, 4]
-        feat_L1 = self._anchor_feat  # [N1, feat_dim]
-
-        N1 = anchors_L1.shape[0]
-
-        if N1 == 0:
-            # 空の場合は空のテンソルを返す
-            empty_anchor = torch.empty(0, 3, device=device)
-            empty_scaling = torch.empty(0, 6, device=device)
-            empty_rotation = torch.empty(0, 4, device=device)
-            empty_feat = torch.empty(0, self.feat_dim, device=device)
-            empty_offset = torch.empty(0, self.n_offsets, 3, device=device)
-            empty_mask = torch.empty(0, self.n_offsets + 1, 1, device=device)
-            return empty_anchor, empty_scaling, empty_rotation, empty_feat, empty_offset, empty_mask
-
-        # 1. Level1 → Level2 のグルーピング
-        # ボクセルグリッド座標を計算
-        grid_L2 = torch.round(anchors_L1 / voxel_size_L2).long()  # [N1, 3]
-
-        # ユニークなセルとインデックスを取得
-        # unique は連続したメモリを要求するため、contiguous() を呼ぶ
-        grid_L2_flat = grid_L2[:, 0] * 1000000 + grid_L2[:, 1] * 1000 + grid_L2[:, 2]  # [N1]
-        unique_cells, inverse_idx = torch.unique(grid_L2_flat, return_inverse=True)  # unique_cells: [N2], inverse_idx: [N1]
-
-        N2 = unique_cells.shape[0]
-
-        # 2. 各グループcについてモーメントマッチング
-        anchor_L2_list = []
-        scaling_L2_list = []
-        rotation_L2_list = []
-        feat_L2_list = []
-
-        for c in range(N2):
-            # グループcに属するLevel1アンカーのマスク
-            idx_c = (inverse_idx == c)  # [N1] bool
-
-            # グループ内のアンカー
-            a_i = anchors_L1[idx_c]  # [M, 3]
-            sc_i = scaling_L1[idx_c]  # [M, 6]
-            rt_i = rotation_L1[idx_c]  # [M, 4]
-            f_i = feat_L1[idx_c]  # [M, feat_dim]
-
-            M = a_i.shape[0]
-
-            # 重み（全て1）
-            w = torch.ones(M, device=device)  # [M]
-            w_sum = w.sum()
-
-            # 新しい平均（Level2アンカー位置）
-            mu_L2 = (w[:, None] * a_i).sum(dim=0) / w_sum  # [3]
-
-            # 各Level1アンカーの共分散行列を計算
-            # self.covariance_activation は build_covariance_from_scaling_rotation
-            # scaling: [M, 6], rotation: [M, 4] -> covariance: [M, 3, 3] (対称行列の6要素表現)
-            # strip_symmetric で [M, 6] になっている可能性があるので、完全な [M, 3, 3] に戻す
-
-            # build_scaling_rotation を使って L @ L^T を計算
-            from utils.general_utils import build_scaling_rotation
-
-            # scaling_activation で exp を適用（既に get_scaling で適用済み）
-            # sc_i は既に exp 済み
-            L_i = build_scaling_rotation(sc_i, rt_i)  # [M, 3, 3]
-            Sigma_i = L_i @ L_i.transpose(1, 2)  # [M, 3, 3]
-
-            # 新しい共分散（Level2共分散）
-            # Σ_L2 = Σ_i w_i (Σ_i + (μ_i - μ_L2)(μ_i - μ_L2)^T) / Σ_i w_i
-            diff = a_i - mu_L2.unsqueeze(0)  # [M, 3]
-            outer = diff.unsqueeze(2) @ diff.unsqueeze(1)  # [M, 3, 3]
-
-            Sigma_L2 = (w[:, None, None] * (Sigma_i + outer)).sum(dim=0) / w_sum  # [3, 3]
-
-            # 3. 共分散 → (scaling, rotation) への変換
-            # 固有値分解
-            eigvals, eigvecs = torch.linalg.eigh(Sigma_L2)  # eigvals: [3], eigvecs: [3, 3]
-
-            # 固有値をクランプ（数値安定性）
-            eigvals = torch.clamp(eigvals, min=1e-6)
-
-            # スケール = sqrt(固有値)
-            scales = torch.sqrt(eigvals)  # [3]
-
-            # 回転行列 → クォータニオン
-            R = eigvecs  # [3, 3]
-            quat = self._rotation_matrix_to_quaternion(R)  # [4]
-
-            # scaling ベクトルは 6次元
-            # 最初の3次元: log(scales), 残り3次元: 0
-            log_scales = torch.log(scales)  # [3]
-            scaling_vec = torch.cat([log_scales, torch.zeros(3, device=device)], dim=0)  # [6]
-
-            # Level2の特徴：重み付き平均
-            feat_L2 = (w[:, None] * f_i).sum(dim=0) / w_sum  # [feat_dim]
-
-            # リストに追加
-            anchor_L2_list.append(mu_L2)
-            scaling_L2_list.append(scaling_vec)
-            rotation_L2_list.append(quat)
-            feat_L2_list.append(feat_L2)
-
-        # スタック
-        anchor_L2 = torch.stack(anchor_L2_list, dim=0)  # [N2, 3]
-        scaling_L2 = torch.stack(scaling_L2_list, dim=0)  # [N2, 6]
-        rotation_L2 = torch.stack(rotation_L2_list, dim=0)  # [N2, 4]
-        feat_L2 = torch.stack(feat_L2_list, dim=0)  # [N2, feat_dim]
-
-        # 4. Level2の offset / mask の初期化
-        # offset: 全てゼロ
-        offset_L2 = torch.zeros((N2, self.n_offsets, 3), device=device)  # [N2, n_offsets, 3]
-
-        # mask: 全て1
-        mask_L2 = torch.ones((N2, self.n_offsets + 1, 1), device=device)  # [N2, n_offsets+1, 1]
-
-        return anchor_L2, scaling_L2, rotation_L2, feat_L2, offset_L2, mask_L2
-
-    def _rotation_matrix_to_quaternion(self, R: torch.Tensor) -> torch.Tensor:
-        """
-        3x3回転行列をクォータニオン [w, x, y, z] に変換
-
-        Args:
-            R: [3, 3] 回転行列
-
-        Returns:
-            [4] クォータニオン（正規化済み）
-        """
-        # Shepperdのアルゴリズムを使用
-        # https://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
-
-        trace = R[0, 0] + R[1, 1] + R[2, 2]
-
-        if trace > 0:
-            s = 0.5 / torch.sqrt(trace + 1.0)
-            w = 0.25 / s
-            x = (R[2, 1] - R[1, 2]) * s
-            y = (R[0, 2] - R[2, 0]) * s
-            z = (R[1, 0] - R[0, 1]) * s
-        elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-            s = 2.0 * torch.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
-            w = (R[2, 1] - R[1, 2]) / s
-            x = 0.25 * s
-            y = (R[0, 1] + R[1, 0]) / s
-            z = (R[0, 2] + R[2, 0]) / s
-        elif R[1, 1] > R[2, 2]:
-            s = 2.0 * torch.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
-            w = (R[0, 2] - R[2, 0]) / s
-            x = (R[0, 1] + R[1, 0]) / s
-            y = 0.25 * s
-            z = (R[1, 2] + R[2, 1]) / s
-        else:
-            s = 2.0 * torch.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
-            w = (R[1, 0] - R[0, 1]) / s
-            x = (R[0, 2] + R[2, 0]) / s
-            y = (R[1, 2] + R[2, 1]) / s
-            z = 0.25 * s
-
-        quat = torch.stack([w, x, y, z], dim=0)
-
-        # 正規化
-        quat = quat / torch.norm(quat)
-
-        return quat
-
-    @torch.no_grad()
     def compute_total_bits(self):
-        """
-        全anchorを使って正確なビット数を計算する
-        Returns:
-            (bit_feat, bit_scaling, bit_offsets): 各パラメータの総ビット数
-        """
-        # AQM設定用のパラメータ
+        """全アンカーを使って feat / scaling / offsets それぞれの総ビット数を返す。"""
         Q_feat = 1
-        Q_scaling = 0.1
+        Q_scaling = 0.001
         Q_offsets = 0.2
 
-        mask_anchor = self.get_mask_anchor.to(torch.bool)[:, 0]  # N
+        mask_anchor = self.get_mask_anchor.to(torch.bool)[:, 0]
 
         _anchor = self.get_anchor[mask_anchor]
         _feat = self._anchor_feat[mask_anchor]
@@ -1789,57 +1392,67 @@ class GaussianModel(nn.Module):
         _scaling = self.get_scaling[mask_anchor]
         _mask = self.get_mask[mask_anchor]
 
-        feat_context = self.calc_interp_feat(_anchor)
-        mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-            torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+        _anchor_int = torch.round(_anchor / self.voxel_size).long()
+        sorted_indices = calculate_morton_order(_anchor_int)
+        unsort_indices = torch.argsort(sorted_indices)
+        anchor_sorted = _anchor[sorted_indices]
+        if self.use_causal_knn:
+            # codec と一致させるため anchor_feat を使わない
+            hash_feats = self.calc_interp_feat(anchor_sorted)
+            feat_context = self.causal_knn(hash_feats, anchor_sorted, chunk_size=MAX_batch_size)
+            feat_context = feat_context[unsort_indices]
+        else:
+            feat_context_no_cond = self.calc_interp_feat(anchor_sorted)[unsort_indices]
+            feat_context_with_scale_offset = self.calc_interp_feat(
+                anchor_sorted,
+                _scaling[sorted_indices],
+                _grid_offsets[sorted_indices],
+            )[unsort_indices]
 
-        # conduct_encoding()と同じようにチャネルごとのQを使う
-        Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])  # [N, 50]
-        Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)  # [N*6]
-        Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)  # [N*30]
-        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))  # [N, 50]
-        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))  # [N*6]
-        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))  # [N*30]
+        if self.use_causal_knn:
+            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                self.forward_grid(feat_context)
+        else:
+            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                self.forward_grid(feat_context_no_cond)
+            mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                self.forward_grid(feat_context_with_scale_offset)
+
+        Q_feat_adj    = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+        Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
+        Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+        Q_feat    = torch.clamp(Q_feat    * (1 + torch.tanh(Q_feat_adj)),    min=1e-4)
+        Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=1e-5)
+        Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=1e-4)
+
         _feat = (STE_multistep.apply(_feat, Q_feat)).detach()
         mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
-        probs = torch.stack([prob, prob_adj], dim=-1)
-        probs = torch.softmax(probs, dim=-1)
+        probs = torch.softmax(torch.stack([prob, prob_adj], dim=-1), dim=-1)
 
-        # conduct_encoding()と同じ形状にする
-        mean_scaling = mean_scaling.contiguous().view(-1)
+        mean_scaling  = mean_scaling.contiguous().view(-1)
         scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-        mean_offsets = mean_offsets.contiguous().view(-1)
+        mean_offsets  = mean_offsets.contiguous().view(-1)
         scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-        scale = torch.clamp(scale, min=1e-9)
+        scale         = torch.clamp(scale, min=1e-9)
 
         grid_scaling = (STE_multistep.apply(_scaling.view(-1), Q_scaling)).detach()
-        offsets = (STE_multistep.apply(_grid_offsets.view(-1, 3*self.n_offsets).view(-1), Q_offsets)).detach()
-        mask_tmp = _mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1)
+        offsets      = (STE_multistep.apply(_grid_offsets.view(-1, 3 * self.n_offsets).view(-1), Q_offsets)).detach()
+        mask_tmp     = _mask.repeat(1, 1, 3).view(-1, 3 * self.n_offsets).view(-1)
 
-        bit_feat = self.EG_mix_prob_2.forward(_feat,
-                                            mean, mean_adj,
-                                            scale, scale_adj,
-                                            probs[..., 0], probs[..., 1],
-                                            Q=Q_feat)
-
+        bit_feat = self.EG_mix_prob_2.forward(
+            _feat, mean, mean_adj, scale, scale_adj,
+            probs[..., 0], probs[..., 1], Q=Q_feat)
         bit_scaling = self.entropy_gaussian.forward(grid_scaling, mean_scaling, scale_scaling, Q_scaling)
         bit_offsets = self.entropy_gaussian.forward(offsets, mean_offsets, scale_offsets, Q_offsets)
         bit_offsets = bit_offsets * mask_tmp
 
-        bit_feat_total = torch.sum(bit_feat).item()
-        bit_scaling_total = torch.sum(bit_scaling).item()
-        bit_offsets_total = torch.sum(bit_offsets).item()
-
-        return bit_feat_total, bit_scaling_total, bit_offsets_total
+        return torch.sum(bit_feat).item(), torch.sum(bit_scaling).item(), torch.sum(bit_offsets).item()
 
     @torch.no_grad()
     def estimate_final_bits(self):
 
-        # AQM設定用のパラメータ
-        # 明らかにスケーリングのみ値が高い
         Q_feat = 1
-        # Q_scaling = 0.001
-        Q_scaling = 0.1
+        Q_scaling = 0.001
         Q_offsets = 0.2
 
         mask_anchor = self.get_mask_anchor.to(torch.bool)[:, 0]  # N
@@ -1851,33 +1464,36 @@ class GaussianModel(nn.Module):
         _mask = self.get_mask[mask_anchor]
         hash_embeddings = self.get_encoding_params()
 
-        feat_context = self.calc_interp_feat(_anchor)  # [N_visible_anchor*0.2, 32]
-        mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-            torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)  # [N_visible_anchor, 32], [N_visible_anchor, 32]
-
-        # conduct_encoding()と同じようにチャネルごとのQを使う
-        Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])  # [N, 50]
-        Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)  # [N*6]
-        Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)  # [N*30]
-        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))  # [N, 50]
-        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))  # [N*6]
-        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))  # [N*30]
+        if self.use_causal_knn:
+            _anchor_int = torch.round(_anchor / self.voxel_size).long()
+            sorted_indices = calculate_morton_order(_anchor_int)
+            unsort_indices = torch.argsort(sorted_indices)
+            anchor_sorted = _anchor[sorted_indices]
+            hash_feats = self.calc_interp_feat(anchor_sorted)
+            feat_context = self.causal_knn(hash_feats, anchor_sorted, chunk_size=MAX_batch_size)[unsort_indices]
+        else:
+            feat_context_no_cond = self.calc_interp_feat(_anchor)
+            feat_context_with_scale_offset = self.calc_interp_feat(_anchor, _scaling, _grid_offsets)
+        if self.use_causal_knn:
+            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+        else:
+            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+            mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
+        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
         _feat = (STE_multistep.apply(_feat, Q_feat)).detach()
-        # mean_adj, scale_adj, prob_adj, gate = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
         mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
         probs = torch.stack([prob, prob_adj], dim=-1)
         probs = torch.softmax(probs, dim=-1)
 
-        # conduct_encoding()と同じ形状にする
-        mean_scaling = mean_scaling.contiguous().view(-1)
-        scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-        mean_offsets = mean_offsets.contiguous().view(-1)
-        scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-        scale = torch.clamp(scale, min=1e-9)
-
-        grid_scaling = (STE_multistep.apply(_scaling.view(-1), Q_scaling)).detach()
-        offsets = (STE_multistep.apply(_grid_offsets.view(-1, 3*self.n_offsets).view(-1), Q_offsets)).detach()
-        mask_tmp = _mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1)
+        grid_scaling = (STE_multistep.apply(_scaling, Q_scaling)).detach()
+        offsets = (STE_multistep.apply(_grid_offsets, Q_offsets.unsqueeze(1))).detach()
+        offsets = offsets.view(-1, 3*self.n_offsets)
+        mask_tmp = _mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets)
 
         bit_feat = self.EG_mix_prob_2.forward(_feat,
                                             mean, mean_adj,
@@ -1943,8 +1559,12 @@ class GaussianModel(nn.Module):
         _anchor_int = torch.round(_anchor / self.voxel_size)
         sorted_indices = calculate_morton_order(_anchor_int)
         _anchor_int = _anchor_int[sorted_indices]
-        npz_path= os.path.join(pre_path_name, 'xyz_gpcc.npz')
-        means_strings = compress_gpcc(_anchor_int)
+        npz_path = os.path.join(pre_path_name, 'xyz_gpcc.npz')
+        if self.use_reno:
+            from utils.reno_utils import compress_reno
+            means_strings = compress_reno(_anchor_int, ckpt_path=self.reno_ckpt_path)
+        else:
+            means_strings = compress_gpcc(_anchor_int)
         np.savez_compressed(npz_path, voxel_size=self.voxel_size, means_strings=means_strings)
         bits_xyz = os.path.getsize(npz_path) * 8
         t_anchor += get_time() - t_anchor_0
@@ -1958,6 +1578,10 @@ class GaussianModel(nn.Module):
         torch.save(self.x_bound_min, os.path.join(pre_path_name, 'x_bound_min.pkl'))
         torch.save(self.x_bound_max, os.path.join(pre_path_name, 'x_bound_max.pkl'))
 
+        # Pre-compute causal KNN context for all anchors (already sorted in Morton order)
+        if self.use_causal_knn:
+            all_feat_context = self.causal_knn(self.calc_interp_feat(_anchor), _anchor, chunk_size=MAX_batch_size)
+
         steps = (N // MAX_batch_size) if (N % MAX_batch_size) == 0 else (N // MAX_batch_size + 1)
 
         bit_feat_list = []
@@ -1967,7 +1591,6 @@ class GaussianModel(nn.Module):
         hash_b_name = os.path.join(pre_path_name, 'hash.b')
         masks_b_name = os.path.join(pre_path_name, 'masks.b')
 
-        # データをbatch_sizeごとに分割し、処理
         for s in range(steps):
             N_start = s * MAX_batch_size
             N_end = min((s+1)*MAX_batch_size, N)
@@ -1976,207 +1599,147 @@ class GaussianModel(nn.Module):
             scaling_b_name = os.path.join(pre_path_name, 'scaling.b').replace('.b', f'_{s}.b')
             offsets_b_name = os.path.join(pre_path_name, 'offsets.b').replace('.b', f'_{s}.b')
 
-            # AQM用の初期パラメータ
             Q_feat = 1
-            # Q_scaling = 0.001
-            Q_scaling = 0.1
+            Q_scaling = 0.001
             Q_offsets = 0.2
 
-            # 現在のステップに応じたアンカーを切り出し
             anchor_slice = _anchor[N_start:N_end]
+            N_num = N_end - N_start
 
-            # encode feat
-            # features = self.spatial_context_module(x_orig, features)を適用
-            # ここでハッシュエンコーディングも適用される
-            '''
-            calc_interp_feat(anchor_slice)の流れ
-            1. 元座標を保存
-            2. 座標の正規化
-            3. ハッシュエンコーディング(GridEncoderまたは,mix_3D2D_encoding)を適用し、3D座標から特徴量を取得
-                3.1 空間コンテキストをspatial_context_moduleで計算し特徴量に統合
-            4. 取得した特徴量を返す
-            
+            if self.use_causal_knn:
+                # Single-stage: all parameters use pre-computed causal context
+                feat_context = all_feat_context[N_start:N_end]
+                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                    self.forward_grid(feat_context)
 
-            mix_3D2D_encoding(
-                n_features,
-                resolution_list,
-                log2_hashmap_size,
-                resolution_list_2D,
-                log2_hashmap_size_2D,
-                ste_binary,
-                ste_multiscale,
-                add_noise,
-                Q,
-            )の流れ
-            前提として、GridEncordingを複数使用している
-            2Dを使用する場合、2D平面に投影して取得される特徴量も獲得する
-            xyz, xy, yz, zxの4種類のGridEncodingを使用し、各特徴量を結合して最終的な特徴量を生成する
-            xyzは2*16、xy,yz,zxは2*8の特徴量を生成する
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+                Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
+                Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+                mean_scaling = mean_scaling.contiguous().view(-1)
+                mean_offsets = mean_offsets.contiguous().view(-1)
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+                Q_feat = torch.clamp(Q_feat * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
+                Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
+                Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
 
-            GridEncorder(
-                num_dim,(2D or 3D)
-                n_features, (各レベルの特徴次元数)
-                resolution_list, (ハッシュグリッド解像度リスト)
-                log2_hashmap_size, (最大ハッシュテーブルサイズのlog2)
-            )
-            グリッドエンコーディングとは、連続座標を高次元の特徴ベクトルe(x)に移す写像
+                t_scaling_0 = get_time()
+                scaling = _scaling[N_start:N_end].view(-1)
+                scaling = STE_multistep.apply(scaling, Q_scaling, self.get_scaling.mean())
+                torch.cuda.synchronize(); t0 = time.time()
+                bit_scaling = encoder_gaussian_chunk(scaling, mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
+                torch.cuda.synchronize(); t_codec += time.time() - t0
+                bit_scaling_list.append(bit_scaling)
+                t_scaling += get_time() - t_scaling_0
 
-            1. ハッシュテーブルを構築
-                低解像度レベル: 全グリッド点を保存
-                高解像度レベル: ハッシュ衝突を許容（メモリ節約）
-                例（3Dの場合）:
-                    レベル	解像度	理想数 (res³)	実際数 (min)	オフセット(全レベルの合計パラメータ)
-                    0	18	5,832	5,832	0
-                    1	24	13,824	13,824	5,832
-                    2	33	35,937	35,944	19,656
-                    ...	...	...	...	...
-                    9	275	20,796,875	524,288	...
-                    10	376	53,157,376	524,288	...
-                    11	514	135,796,744	524,288	...
-            2. 
+                t_offset_0 = get_time()
+                mask = _mask[N_start:N_end].repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1).to(torch.bool)
+                offsets = _grid_offsets[N_start:N_end].view(-1, 3*self.n_offsets).view(-1)
+                offsets = STE_multistep.apply(offsets, Q_offsets, self._offset.mean())
+                offsets[~mask] = 0.0
+                torch.cuda.synchronize(); t0 = time.time()
+                bit_offsets = encoder_gaussian_chunk(offsets[mask], mean_offsets[mask], scale_offsets[mask], Q_offsets[mask], file_name=offsets_b_name, chunk_size=10_0000)
+                torch.cuda.synchronize(); t_codec += time.time() - t0
+                bit_offsets_list.append(bit_offsets)
+                t_offset += get_time() - t_offset_0
 
+                feat = _feat[N_start:N_end]
+                feat = STE_multistep.apply(feat, Q_feat, self._anchor_feat.mean())
+                torch.cuda.synchronize(); t0 = time.time()
 
-            '''
+                t_feature_0 = get_time()
+                mean_scale = torch.cat([mean, scale, prob], dim=-1)
+                scale = torch.clamp(scale, min=1e-9)
+                bit_feat = 0
+                for cc in range(5):
+                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
+                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
+                    probs = torch.softmax(probs, dim=-1)
+                    feat_tmp = feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                    Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                    bit_feat += encoder_gaussian_mixed_chunk(
+                        feat_tmp,
+                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
+                        [scale[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
+                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        Q_feat_tmp,
+                        file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
+                t_feature += get_time() - t_feature_0
+                torch.cuda.synchronize(); t_codec += time.time() - t0
+                bit_feat_list.append(bit_feat)
 
-            feat_context = self.calc_interp_feat(anchor_slice)  # [N_num, ?]
-
-            # many [N_num, ?]
-            # 1つのMLPで全てのガウシアンパラメータの分布（平均・スケール）と量子化パラメータを一度に予測
-            # ここがHash Assisted Context
-            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
-
-            # 調整パラメータの次元合わせ
-            Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
-            Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
-            Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
-            
-            # 統計パラメータの整形(スケーリングとオフセットの平均、分散を取得)
-            mean_scaling = mean_scaling.contiguous().view(-1)
-            mean_offsets = mean_offsets.contiguous().view(-1)
-            scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-            scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-            
-            # 適応的な調整の適用
-            Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
-            Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-            Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
-
-            # 特徴量の抽出
-            feat = _feat[N_start:N_end]
-            # 特徴量をSTEで量子化
-                # STEとはStraight-Through Estimatorの略で、量子化などの非微分可能な操作を微分可能に近似する手法
-            feat = STE_multistep.apply(feat, Q_feat, self._anchor_feat.mean())
-            torch.cuda.synchronize(); t0 = time.time()
-
-            t_feature_0 = get_time()
-            # 特徴量の平均、分散、確率・重みを結合
-            mean_scale = torch.cat([mean, scale, prob], dim=-1)
-            scale = torch.clamp(scale, min=1e-9)
-            bit_feat = 0
-
-            # use_gated_mlp に応じて分割数とチャネルサイズを変更
-            if self.mlp_deform.use_gated:
-                num_chunks = 10  # 10分割
-                chunk_size = 5   # 各5次元
             else:
-                num_chunks = 5   # 5分割
-                chunk_size = 10  # 各10次元
+                # Two-stage: Stage 1 = scaling/offsets (no conditioning), Stage 2 = feat (conditioned on scaling/offset)
+                # Stage 1: encode scaling/offsets without conditioning
+                feat_context_no_cond = self.calc_interp_feat(anchor_slice)
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                    torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
-            # チャンクごとにループ
-            # ここからIntra-Anchor Context
-            for cc in range(num_chunks):
-                # mean_adj, scale_adj, prob_adj, gate = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
-                # 調整パラメータを予測
-                mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
-                # HAC予測の確率とIntra-Anchorの確率を結合
-                # 重みの計算
-                probs = torch.stack([prob[:, cc*chunk_size:cc*chunk_size+chunk_size], prob_adj], dim=-1)
-                probs = torch.softmax(probs, dim=-1)
+                Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
+                Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+                mean_scaling = mean_scaling.contiguous().view(-1)
+                mean_offsets = mean_offsets.contiguous().view(-1)
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+                Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
+                Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
 
-                # チャンクごとの特徴量と量子化パラメータを取得
-                feat_tmp = feat[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1)
-                Q_feat_tmp = Q_feat[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1)
+                t_scaling_0 = get_time()
+                scaling = _scaling[N_start:N_end].view(-1)
+                scaling = STE_multistep.apply(scaling, Q_scaling, self.get_scaling.mean())
+                torch.cuda.synchronize(); t0 = time.time()
+                bit_scaling = encoder_gaussian_chunk(scaling, mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
+                torch.cuda.synchronize(); t_codec += time.time() - t0
+                bit_scaling_list.append(bit_scaling)
+                t_scaling += get_time() - t_scaling_0
 
-                # Gaussian Mixtureを実行
-                '''
-                encoder_gaussian_mixed_chunk(
-                    x, 
-                    mean_list,  
-                    scale_list, 
-                    probs_list, 
-                    Q, 
-                    file_name, 
-                    chunk_size
-                )
-                の流れ
-                1. xをQを使用して量子化
-                2. ガウス分布N(mean, scale)とN(mean_adj, scale_adj)のCDF(累積分布関数)を計算
-                3. xを正規化
-                4. xとCDFを使用し算術符号化(AE)を実行
-                5. file_nameにビット列を保存
-                6. ビット数を返す
-                '''
-                bit_feat += encoder_gaussian_mixed_chunk(
-                    feat_tmp,
-                    [mean[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                    [scale[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), scale_adj.contiguous().view(-1)],
-                    [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
-                    Q_feat_tmp,
-                    file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
-            t_feature += get_time() - t_feature_0
+                t_offset_0 = get_time()
+                mask = _mask[N_start:N_end]  # {0, 1}  # [N_num, K, 1]
+                mask = mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1).to(torch.bool)  # [N_num*K*3]
+                offsets = _grid_offsets[N_start:N_end].view(-1, 3*self.n_offsets).view(-1)  # [N_num*K*3]
+                offsets = STE_multistep.apply(offsets, Q_offsets, self._offset.mean())
+                offsets[~mask] = 0.0
+                torch.cuda.synchronize(); t0 = time.time()
+                bit_offsets = encoder_gaussian_chunk(offsets[mask], mean_offsets[mask], scale_offsets[mask], Q_offsets[mask], file_name=offsets_b_name, chunk_size=10_0000)
+                torch.cuda.synchronize(); t_codec += time.time() - t0
+                bit_offsets_list.append(bit_offsets)
+                t_offset += get_time() - t_offset_0
 
-            # GPU同期と時間計測、ビット数取得
-            torch.cuda.synchronize(); t_codec += time.time() - t0
-            bit_feat_list.append(bit_feat)
+                scaling_for_cond = scaling.view(N_num, 6).detach()
+                offsets_for_cond = offsets.view(N_num, self.n_offsets, 3).detach()
 
+                # Stage 2: encode feat conditioned on quantized scaling and offset
+                feat_context_with_scale_offset = self.calc_interp_feat(anchor_slice, anchor_scale=scaling_for_cond, anchor_offset=offsets_for_cond)
+                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                    torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
-            t_scaling_0 = get_time()
-            # スケーリングの抽出と量子化
-            scaling = _scaling[N_start:N_end].view(-1)  # [N_num*6]
-            scaling = STE_multistep.apply(scaling, Q_scaling, self.get_scaling.mean())
-            torch.cuda.synchronize(); t0 = time.time()
-            # スケーリングを単一ガウス分布でエンコード
-            '''
-            encoder_gaussian_chunk(x, mean, scale, Q, file_name, chunk_size)の流れ
-            1. xとQを使用し量子化
-            2. ガウス分布N(mean, scale)のCDF(累積分布関数)を計算
-            3. xを正規化
-            4. xとCDFを使用し算術符号化(AE)を実行
-            5. file_nameにビット列を保存
-            6. ビット数を返す
-            '''
-            bit_scaling = encoder_gaussian_chunk(
-                scaling, 
-                mean_scaling, 
-                scale_scaling, 
-                Q_scaling, 
-                file_name=scaling_b_name, 
-                chunk_size=10_0000
-            )
-            torch.cuda.synchronize(); t_codec += time.time() - t0
-            bit_scaling_list.append(bit_scaling)
-            t_scaling += get_time() - t_scaling_0
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+                Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
 
-            t_offset_0 = get_time()
-            mask = _mask[N_start:N_end]  # {0, 1}  # [N_num, K, 1]
-            mask = mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets).view(-1).to(torch.bool)  # [N_num*K*3]
-            # オフセットの抽出と量子化
-            offsets = _grid_offsets[N_start:N_end].view(-1, 3*self.n_offsets).view(-1)  # [N_num*K*3]
-            offsets = STE_multistep.apply(offsets, Q_offsets, self._offset.mean())
-            offsets[~mask] = 0.0
-            torch.cuda.synchronize(); t0 = time.time()
-            bit_offsets = encoder_gaussian_chunk(
-                offsets[mask], 
-                mean_offsets[mask], 
-                scale_offsets[mask], 
-                Q_offsets[mask], 
-                file_name=offsets_b_name, 
-                chunk_size=10_0000
-            )
-            torch.cuda.synchronize(); t_codec += time.time() - t0
-            bit_offsets_list.append(bit_offsets)
-            t_offset += get_time() - t_offset_0
+                feat = _feat[N_start:N_end]
+                feat = STE_multistep.apply(feat, Q_feat, self._anchor_feat.mean())
+                torch.cuda.synchronize(); t0 = time.time()
+
+                t_feature_0 = get_time()
+                mean_scale = torch.cat([mean, scale, prob], dim=-1)
+                scale_feat = torch.clamp(scale, min=1e-9)
+                bit_feat = 0
+                for cc in range(5):
+                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
+                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
+                    probs = torch.softmax(probs, dim=-1)
+                    feat_tmp = feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                    Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                    bit_feat += encoder_gaussian_mixed_chunk(
+                        feat_tmp,
+                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
+                        [scale_feat[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
+                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        Q_feat_tmp,
+                        file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
+                t_feature += get_time() - t_feature_0
+                torch.cuda.synchronize(); t_codec += time.time() - t0
+                bit_feat_list.append(bit_feat)
 
             torch.cuda.empty_cache()
 
@@ -2254,10 +1817,14 @@ class GaussianModel(nn.Module):
 
         t_anchor_0 = get_time()
         npz_path = os.path.join(pre_path_name, 'xyz_gpcc.npz')
-        data_dict = np.load(npz_path)
+        data_dict = np.load(npz_path, allow_pickle=True)
         voxel_size = float(data_dict['voxel_size'])
         means_strings = data_dict['means_strings'].tobytes()
-        _anchor_int_dec = decompress_gpcc(means_strings).to('cuda')
+        if self.use_reno:
+            from utils.reno_utils import decompress_reno
+            _anchor_int_dec = decompress_reno(means_strings, ckpt_path=self.reno_ckpt_path).to('cuda')
+        else:
+            _anchor_int_dec = decompress_gpcc(means_strings).to('cuda')
         sorted_indices = calculate_morton_order(_anchor_int_dec)
         _anchor_int_dec = _anchor_int_dec[sorted_indices]
         anchor_decoded = _anchor_int_dec * voxel_size
@@ -2278,6 +1845,10 @@ class GaussianModel(nn.Module):
             hash_embeddings = hash_embeddings.view(-1, self.n_features_per_level)
         t_hash += get_time() - t_hash_0
 
+        # Pre-compute causal KNN context for all decoded anchors (already in Morton order)
+        if self.use_causal_knn:
+            all_feat_context_dec = self.causal_knn(self.calc_interp_feat(anchor_decoded), anchor_decoded, chunk_size=MAX_batch_size)
+
         for s in range(steps):
 
             N_num = min(MAX_batch_size, N - s*MAX_batch_size)
@@ -2289,77 +1860,121 @@ class GaussianModel(nn.Module):
             offsets_b_name = os.path.join(pre_path_name, 'offsets.b').replace('.b', f'_{s}.b')
 
             Q_feat = 1
-            # Q_scaling = 0.001
-            Q_scaling = 0.1
+            Q_scaling = 0.001
             Q_offsets = 0.2
 
-            # encode feat
             anchor_sort = anchor_decoded[N_start:N_end]
-            feat_context = self.calc_interp_feat(anchor_sort)  # [N_num, ?]
-            # many [N_num, ?]
-            
-            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
-            Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
-            Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
-            Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+            if self.use_causal_knn:
+                # Single-stage: all parameters use pre-computed causal context
+                feat_context = all_feat_context_dec[N_start:N_end]
+                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                    self.forward_grid(feat_context)
 
-            mean_scaling = mean_scaling.contiguous().view(-1)
-            mean_offsets = mean_offsets.contiguous().view(-1)
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+                Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
+                Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+                mean_scaling = mean_scaling.contiguous().view(-1)
+                mean_offsets = mean_offsets.contiguous().view(-1)
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+                Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+                Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
+                Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
 
-            scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-            scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-            Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
-            Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-            Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
+                t_scaling_0 = get_time()
+                scaling_decoded = decoder_gaussian_chunk(mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
+                scaling_decoded = scaling_decoded.view(N_num, 6)
+                scaling_decoded_list.append(scaling_decoded)
+                t_scaling += get_time() - t_scaling_0
 
-            t_feature_0 = get_time()
-            feat_decoded = torch.zeros(size=[N_num, self.feat_dim], device='cuda', dtype=torch.float32)
-            mean_scale = torch.cat([mean, scale, prob], dim=-1)
-            scale = torch.clamp(scale, min=1e-9)
+                t_offset_0 = get_time()
+                masks_tmp = masks_decoded[N_start:N_end].repeat(1, 1, 3).view(-1, 3 * self.n_offsets).view(-1).to(torch.bool)
+                offsets_decoded_tmp = decoder_gaussian_chunk(mean_offsets[masks_tmp], scale_offsets[masks_tmp], Q_offsets[masks_tmp], file_name=offsets_b_name, chunk_size=10_0000)
+                offsets_decoded = torch.zeros_like(mean_offsets)
+                offsets_decoded[masks_tmp] = offsets_decoded_tmp
+                offsets_decoded = offsets_decoded.view(N_num, -1).view(N_num, self.n_offsets, 3)
+                offsets_decoded_list.append(offsets_decoded)
+                t_offset += get_time() - t_offset_0
 
-            # use_gated_mlp に応じて分割数とチャネルサイズを変更
-            if self.mlp_deform.use_gated:
-                num_chunks = 10  # 10分割
-                chunk_size = 5   # 各5次元
+                t_feature_0 = get_time()
+                feat_decoded = torch.zeros(size=[N_num, self.feat_dim], device='cuda', dtype=torch.float32)
+                mean_scale = torch.cat([mean, scale, prob], dim=-1)
+                scale = torch.clamp(scale, min=1e-9)
+                for cc in range(5):
+                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
+                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
+                    probs = torch.softmax(probs, dim=-1)
+                    Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                    feat_decoded_tmp = decoder_gaussian_mixed_chunk(
+                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
+                        [scale[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
+                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        Q_feat_tmp,
+                        file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
+                    feat_decoded_tmp = feat_decoded_tmp.view(N_num, 10)
+                    feat_decoded[:, cc*10:cc*10+10] = feat_decoded_tmp
+                feat_decoded_list.append(feat_decoded)
+                t_feature += get_time() - t_feature_0
+
             else:
-                num_chunks = 5   # 5分割
-                chunk_size = 10  # 各10次元
+                # Two-stage: Stage 1 = scaling/offsets (no conditioning), Stage 2 = feat (conditioned on scaling/offset)
+                # Stage 1: decode scaling/offsets without conditioning
+                feat_context_no_cond = self.calc_interp_feat(anchor_sort)
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                    torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
-            for cc in range(num_chunks):
-                # mean_adj, scale_adj, prob_adj, gate = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
-                mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
-                probs = torch.stack([prob[:, cc*chunk_size:cc*chunk_size+chunk_size], prob_adj], dim=-1)
-                probs = torch.softmax(probs, dim=-1)
-                Q_feat_tmp = Q_feat[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1)
+                Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
+                Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+                mean_scaling = mean_scaling.contiguous().view(-1)
+                mean_offsets = mean_offsets.contiguous().view(-1)
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+                Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
+                Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
 
-                feat_decoded_tmp = decoder_gaussian_mixed_chunk(
-                    [mean[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                    [scale[:, cc*chunk_size:cc*chunk_size+chunk_size].contiguous().view(-1), scale_adj.contiguous().view(-1)],
-                    [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
-                    Q_feat_tmp,
-                    file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
+                t_scaling_0 = get_time()
+                scaling_decoded = decoder_gaussian_chunk(mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
+                scaling_decoded = scaling_decoded.view(N_num, 6)  # [N_num, 6]
+                scaling_decoded_list.append(scaling_decoded)
+                t_scaling += get_time() - t_scaling_0
 
-                feat_decoded_tmp = feat_decoded_tmp.view(N_num, chunk_size)
-                feat_decoded[:, cc*chunk_size:cc*chunk_size+chunk_size] = feat_decoded_tmp
-            feat_decoded_list.append(feat_decoded)
-            t_feature += get_time() - t_feature_0
+                t_offset_0 = get_time()
+                masks_tmp = masks_decoded[N_start:N_end].repeat(1, 1, 3).view(-1, 3 * self.n_offsets).view(-1).to(torch.bool)
+                offsets_decoded_tmp = decoder_gaussian_chunk(mean_offsets[masks_tmp], scale_offsets[masks_tmp], Q_offsets[masks_tmp], file_name=offsets_b_name, chunk_size=10_0000)
+                offsets_decoded = torch.zeros_like(mean_offsets)
+                offsets_decoded[masks_tmp] = offsets_decoded_tmp
+                offsets_decoded = offsets_decoded.view(N_num, -1).view(N_num, self.n_offsets, 3)  # [N_num, K, 3]
+                offsets_decoded_list.append(offsets_decoded)
+                t_offset += get_time() - t_offset_0
 
-            t_scaling_0 = get_time()
-            scaling_decoded = decoder_gaussian_chunk(mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
-            scaling_decoded = scaling_decoded.view(N_num, 6)  # [N_num, 6]
-            scaling_decoded_list.append(scaling_decoded)
-            t_scaling += get_time() - t_scaling_0
+                # Stage 2: decode feat conditioned on decoded scaling and offset
+                feat_context_with_scale_offset = self.calc_interp_feat(anchor_sort, anchor_scale=scaling_decoded.detach(), anchor_offset=offsets_decoded.detach())
+                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                    torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
-            t_offset_0 = get_time()
-            masks_tmp = masks_decoded[N_start:N_end].repeat(1, 1, 3).view(-1, 3 * self.n_offsets).view(-1).to(torch.bool)
-            offsets_decoded_tmp = decoder_gaussian_chunk(mean_offsets[masks_tmp], scale_offsets[masks_tmp], Q_offsets[masks_tmp], file_name=offsets_b_name, chunk_size=10_0000)
-            offsets_decoded = torch.zeros_like(mean_offsets)
-            offsets_decoded[masks_tmp] = offsets_decoded_tmp
-            offsets_decoded = offsets_decoded.view(N_num, -1).view(N_num, self.n_offsets, 3)  # [N_num, K, 3]
-            offsets_decoded_list.append(offsets_decoded)
-            t_offset += get_time() - t_offset_0
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+                Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+
+                t_feature_0 = get_time()
+                feat_decoded = torch.zeros(size=[N_num, self.feat_dim], device='cuda', dtype=torch.float32)
+                mean_scale = torch.cat([mean, scale, prob], dim=-1)
+                scale_feat = torch.clamp(scale, min=1e-9)
+                for cc in range(5):
+                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
+                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
+                    probs = torch.softmax(probs, dim=-1)
+                    Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
+                    feat_decoded_tmp = decoder_gaussian_mixed_chunk(
+                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
+                        [scale_feat[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
+                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        Q_feat_tmp,
+                        file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
+                    feat_decoded_tmp = feat_decoded_tmp.view(N_num, 10)
+                    feat_decoded[:, cc*10:cc*10+10] = feat_decoded_tmp
+                feat_decoded_list.append(feat_decoded)
+                t_feature += get_time() - t_feature_0
 
             xyz_decoded_list.append(anchor_sort)
 

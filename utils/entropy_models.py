@@ -72,6 +72,22 @@ class Entropy_gaussian_mix_prob_2(nn.Module):
                 Q=None, x_mean=None, return_lkl=False):
         if Q is None:
             Q = self.Q
+
+        # NaN/Inf check and fix
+        for name, t in [('x', x), ('mean1', mean1), ('mean2', mean2),
+                        ('scale1', scale1), ('scale2', scale2),
+                        ('probs1', probs1), ('probs2', probs2)]:
+            if torch.is_tensor(t):
+                n_nan = torch.isnan(t).sum().item()
+                n_inf = torch.isinf(t).sum().item()
+                if n_nan > 0 or n_inf > 0:
+                    print(f"[EG_mix_prob_2] WARNING: {name} has {n_nan} NaN, {n_inf} Inf values")
+        x      = torch.nan_to_num(x,      nan=0.0,  posinf=1e9,  neginf=-1e9)
+        mean1  = torch.nan_to_num(mean1,  nan=0.0,  posinf=1e9,  neginf=-1e9)
+        mean2  = torch.nan_to_num(mean2,  nan=0.0,  posinf=1e9,  neginf=-1e9)
+        scale1 = torch.nan_to_num(scale1, nan=1e-9, posinf=1e9,  neginf=1e-9)
+        scale2 = torch.nan_to_num(scale2, nan=1e-9, posinf=1e9,  neginf=1e-9)
+
         if use_clamp:
             if x_mean is None:
                 x_mean = x.mean().detach()
@@ -108,6 +124,24 @@ class Entropy_gaussian_mix_prob_3(nn.Module):
                 Q=None, x_mean=None, return_lkl=False):
         if Q is None:
             Q = self.Q
+
+        # NaN/Inf check and fix
+        for name, t in [('x', x), ('mean1', mean1), ('mean2', mean2), ('mean3', mean3),
+                        ('scale1', scale1), ('scale2', scale2), ('scale3', scale3),
+                        ('probs1', probs1), ('probs2', probs2), ('probs3', probs3)]:
+            if torch.is_tensor(t):
+                n_nan = torch.isnan(t).sum().item()
+                n_inf = torch.isinf(t).sum().item()
+                if n_nan > 0 or n_inf > 0:
+                    print(f"[EG_mix_prob_3] WARNING: {name} has {n_nan} NaN, {n_inf} Inf values")
+        x      = torch.nan_to_num(x,      nan=0.0,  posinf=1e9,  neginf=-1e9)
+        mean1  = torch.nan_to_num(mean1,  nan=0.0,  posinf=1e9,  neginf=-1e9)
+        mean2  = torch.nan_to_num(mean2,  nan=0.0,  posinf=1e9,  neginf=-1e9)
+        mean3  = torch.nan_to_num(mean3,  nan=0.0,  posinf=1e9,  neginf=-1e9)
+        scale1 = torch.nan_to_num(scale1, nan=1e-9, posinf=1e9,  neginf=1e-9)
+        scale2 = torch.nan_to_num(scale2, nan=1e-9, posinf=1e9,  neginf=1e-9)
+        scale3 = torch.nan_to_num(scale3, nan=1e-9, posinf=1e9,  neginf=1e-9)
+
         if use_clamp:
             if x_mean is None:
                 x_mean = x.mean().detach()

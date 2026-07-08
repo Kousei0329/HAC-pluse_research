@@ -40,6 +40,19 @@ from utils.encodings import get_binary_vxl_size
 # torch.set_num_threads(32)
 lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
 
+def set_random_seed(seed):
+    """Set random seed for reproducibility"""
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Ensure deterministic behavior
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"Random seed set to: {seed}")
+
 # from lpipsPyTorch import lpips
 
 bit2MB_scale = 8 * 1024 * 1024
@@ -78,6 +91,9 @@ def saveRuntimeCode(dst: str) -> None:
 
 
 def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, wandb=None, logger=None, ply_path=None):
+    # Set random seed for reproducibility
+    set_random_seed(args_param.seed)
+
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
 
@@ -129,11 +145,22 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             use_gated_mlp=args_param.use_gated_mlp,
             use_spatial_context=args_param.use_spatial_context,
             use_joint_context=args_param.use_joint_context,
+            use_anchor_cond_norm=args_param.use_anchor_cond_norm,
+            use_causal_knn=args_param.use_causal_knn,
+            use_reno=args_param.use_reno,
+            reno_ckpt_path=args_param.reno_ckpt_path,
         )
     scene = Scene(dataset, gaussians, ply_path=ply_path)
     gaussians.update_anchor_bound()
 
     gaussians.training_setup(opt)
+
+    reno_optimizer = None
+    if args_param.use_reno and args_param.train_reno:
+        from utils.reno_utils import get_reno_net
+        _reno_net = get_reno_net(args_param.reno_ckpt_path)
+        reno_optimizer = torch.optim.Adam(_reno_net.parameters(), lr=args_param.reno_lr)
+        logger.info(f"[RENO] Fine-tuning enabled: interval={args_param.reno_train_interval}, lr={args_param.reno_lr}")
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -321,12 +348,48 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
+
+            # RENO fine-tuning step
+            if reno_optimizer is not None and iteration % args_param.reno_train_interval == 0:
+                import sys as _sys
+                if '/workspace/RENO' not in _sys.path:
+                    _sys.path.insert(0, '/workspace/RENO')
+                from torchsparse import SparseTensor as _ST
+                from torchsparse.nn import functional as _F
+                _cfg = _F.conv_config.get_default_conv_config()
+                _cfg.kmap_mode = "hashmap"
+                _F.conv_config.set_global_conv_config(_cfg)
+
+                with torch.no_grad():
+                    _anchor = gaussians.get_anchor.detach()
+                    _anchor_int = torch.round(_anchor / gaussians.voxel_size).int()
+                    _shift = _anchor_int.min(dim=0)[0]
+                    _anchor_shifted = (_anchor_int - _shift)
+                    _coords = torch.cat((_anchor_shifted[:, :1] * 0, _anchor_shifted), dim=-1).int()
+                    _feats = torch.ones((_coords.shape[0], 1), device='cuda')
+
+                with torch.enable_grad():
+                    _reno_net.train()
+                    reno_optimizer.zero_grad()
+                    _bpp = _reno_net(_ST(coords=_coords, feats=_feats))
+                    _bpp.backward()
+                reno_optimizer.step()
+
+                if iteration % (args_param.reno_train_interval * 10) == 0:
+                    logger.info(f"[RENO] iter={iteration} bpp={_bpp.item():.4f} anchor_num={_coords.shape[0]}")
+
             if (iteration in checkpoint_iterations):
                 logger.info("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
     torch.cuda.synchronize(); t_end = time.time()
     logger.info("\n Total Training time: {}".format(t_end-t_start-log_time_sub))
+
+    if reno_optimizer is not None:
+        _reno_save_path = os.path.join(dataset.model_path, 'reno_adapted.pt')
+        torch.save(_reno_net.state_dict(), _reno_save_path)
+        logger.info(f"[RENO] Saved adapted weights to {_reno_save_path}")
+        gaussians.reno_ckpt_path = _reno_save_path
 
     return gaussians.x_bound_min, gaussians.x_bound_max
 
@@ -527,6 +590,8 @@ def render_sets(args_param, dataset : ModelParams, iteration : int, pipeline : P
             decoded_version=run_codec,
             is_synthetic_nerf=is_synthetic_nerf,
             use_gated_mlp=args_param.use_gated_mlp,
+            use_reno=args_param.use_reno,
+            reno_ckpt_path=args_param.reno_ckpt_path,
         )
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
         gaussians.eval()
@@ -682,6 +747,14 @@ if __name__ == "__main__":
     parser.add_argument("--use_gated_mlp", action='store_true', default=False, help='Use gated MLP for channel context')
     parser.add_argument("--use_spatial_context", action='store_true', default=False, help='Use spatial context module for hash features')
     parser.add_argument('--use_joint_context', action='store_true', default=False, help='Use joint context module for joint features')
+    parser.add_argument('--use_anchor_cond_norm', action='store_true', default=True, help='Condition hash grid features on anchor scale/offset via FiLM normalization')
+    parser.add_argument('--use_causal_knn', action='store_true', default=True, help='Enable causal K-NN context aggregation for hash grid features (Morton order)')
+    parser.add_argument("--seed", type=int, default=0, help='Random seed for reproducibility')
+    parser.add_argument("--use_reno", action='store_true', default=True, help='Use RENO neural codec for anchor position compression instead of G-PCC')
+    parser.add_argument("--reno_ckpt_path", type=str, default='/workspace/RENO/model/Ford/ckpt.pt', help='Path to RENO checkpoint')
+    parser.add_argument("--train_reno", action='store_true', default=True, help='Fine-tune RENO network weights during training')
+    parser.add_argument("--reno_train_interval", type=int, default=100, help='Update RENO weights every N iterations')
+    parser.add_argument("--reno_lr", type=float, default=1e-4, help='Learning rate for RENO fine-tuning optimizer')
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 
@@ -723,11 +796,13 @@ if __name__ == "__main__":
 
     logger.info("Optimizing " + args.model_path)
 
+    # Generate port before setting seed (to avoid interference)
+    args.port = np.random.randint(10000, 20000)
+
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    args.port = np.random.randint(10000, 20000)
     # network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 

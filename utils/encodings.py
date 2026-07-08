@@ -1,3 +1,44 @@
+'''
+全体的流れ
+1. GridEncoderでgrid_encodeを呼び出す
+2. grid_encodeで_backend.grid_encorder_forwardを呼び出し
+    2.1 grid_encorder_forwardは/workspace/HAC-plus/submodules/gridencoder/src/gridencoder.cu中に存在
+    2.2 ここで、
+        入力座標 (x, y, z) × N点
+            ↓
+        level0 (解像度16)  → 特徴量 [N, 2]
+        level1 (解像度23)  → 特徴量 [N, 2]
+        level2 (解像度32)  → 特徴量 [N, 2]
+        ...
+        level11 (解像度736) → 特徴量 [N, 2]
+            ↓
+        全レベル結合 → [N, 12*2] = [N, 24]
+
+        2.2.1 Step 1: 座標をグリッド格子上の位置に変換（gridencoder.cu:182）
+            pos[d] = 0.5 * (16-2) + 0.5 = 7.5
+
+            格子点: pos_grid[d] = 7   ← 7番目の格子点
+            小数部分: pos[d] = 0.5    ← その格子点からどれだけずれているか
+        
+        2.2.2 Step 2: 周囲8頂点の重みを計算（gridencoder.cu:240）
+            頂点000: w = (1-0.7)*(1-0.3)*(1-0.5) = 0.105
+            頂点001: w = 0.7    *(1-0.3)*(1-0.5) = 0.245
+            頂点010: w = (1-0.7)*0.3    *(1-0.5) = 0.045
+            ...
+        2.2.3 Step 3: グリッドから埋め込みを取り出して加重平均（gridencoder.cu:344）
+            0. 各アンカーは2次元座標を保有しており、この値は学習によって調整される
+            1. アンカーから各格子点までの距離を計算する(8つ)
+            2. 0と1を掛け合わせて、加算することで[1, 2]を獲得する
+            3. これをすべてのアンカー点で行い、[N, 2]を作る
+            4. すべてのレベルで行い、[N, 2×12]を作成
+    ※ハッシュグリッドのハッシュは格子点を格納する部分を指していた
+    要は16^3はすべて保有できるけど、736^3はバカみたいな数になっちゃうから、ハッシュで保有しようねっていう
+    基本的に2^19になっているらしい
+
+'''
+
+
+
 import torch
 import torch.nn as nn
 from torch.autograd import Function
@@ -221,6 +262,8 @@ class _grid_encode(Function):
 
         return grad_inputs, grad_embeddings, None, None, None, None, None, None, None, None
 grid_encode = _grid_encode.apply
+
+
 class GridEncoder(nn.Module):
     def __init__(self,
                  num_dim=3,
@@ -305,7 +348,10 @@ class GridEncoder(nn.Module):
         max_level_id = self.n_levels if max_level_id is None else min(max_level_id, self.n_levels)
         n_levels_calc = max_level_id - min_level_id
 
+        # ここでgrid_encodeを呼び出し
         outputs = grid_encode(inputs, embeddings, self.offsets_list, self.resolutions_list, inputs.requires_grad, min_level_id, n_levels_calc, binary_vxl, PV)
+        
+        
         outputs = outputs.view(prefix_shape + [n_levels_calc * self.n_features])
 
         return outputs

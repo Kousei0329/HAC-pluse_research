@@ -200,7 +200,7 @@ def encoder_gaussian_mixed_chunk(x, mean_list, scale_list, prob_list, Q, file_na
     return sum(bit_len_list)
 
 
-def encoder_gaussian_mixed(x, mean_list, scale_list, prob_list, Q, file_name='tmp.b'):
+def encoder_gaussian_mixed(x, mean_list, scale_list, prob_list, Q, file_name='tmp.b', retry_count=0, max_retries=3):
     # should be with single dimension
     assert file_name.endswith('.b')
     assert len(x.shape) == 1
@@ -210,37 +210,124 @@ def encoder_gaussian_mixed(x, mean_list, scale_list, prob_list, Q, file_name='tm
     x_int_round = torch.round(x / Q)  # [100]
     max_value = x_int_round.max()
     min_value = x_int_round.min()
-    lower_all = int(0)
-    for (mean, scale, prob) in zip(mean_list, scale_list, prob_list):
-        lower = arithmetic.calculate_cdf(
-            mean,
-            scale,
-            Q,
-            min_value,
-            max_value
-        ) * prob.unsqueeze(-1)
-        if isinstance(lower_all, int):
-            lower_all = lower
-        else:
-            lower_all += lower
-    lower = torch.clamp(lower_all, min=0.0, max=1.0)
-    del mean
-    del scale
-    del prob
 
-    x_tmp = x_int_round - min_value
-    x_tmp = torch.clamp(x_tmp, min=0, max=32767)
-    x_int_round_idx = x_tmp.to(torch.int16)
-    (byte_stream_torch, cnt_torch) = arithmetic.arithmetic_encode(
-        x_int_round_idx,
-        lower,
-        chunk_size_cuda,
-        int(lower.shape[0]),
-        int(lower.shape[1])
-    )
-    cnt_bytes = cnt_torch.cpu().numpy().tobytes()
-    byte_stream_bytes = byte_stream_torch.cpu().numpy().tobytes()
-    len_cnt_bytes = len(cnt_bytes)
+    # 量子化後の範囲が大きすぎる場合はチェック
+    value_range = int(max_value.item() - min_value.item())
+    max_allowed_range = 100000  # メモリ制限: 範囲の上限
+    if value_range > max_allowed_range:
+        print(f"[ERROR] Quantized range too large for {file_name}: {value_range} (limit: {max_allowed_range})")
+        print(f"[ERROR] min_value={min_value.item()}, max_value={max_value.item()}, Q range: {Q.min().item():.6f}-{Q.max().item():.6f}")
+        raise RuntimeError(f"Quantization range {value_range} exceeds maximum allowed range {max_allowed_range}. Consider using larger Q values.")
+
+    try:
+        lower_all = int(0)
+        for (mean, scale, prob) in zip(mean_list, scale_list, prob_list):
+            lower = arithmetic.calculate_cdf(
+                mean,
+                scale,
+                Q,
+                min_value,
+                max_value
+            ) * prob.unsqueeze(-1)
+            if isinstance(lower_all, int):
+                lower_all = lower
+            else:
+                lower_all += lower
+        lower = torch.clamp(lower_all, min=0.0, max=1.0)
+        del mean
+        del scale
+        del prob
+
+        x_tmp = x_int_round - min_value
+        x_tmp = torch.clamp(x_tmp, min=0, max=32767)
+        x_int_round_idx = x_tmp.to(torch.int16)
+        (byte_stream_torch, cnt_torch) = arithmetic.arithmetic_encode(
+            x_int_round_idx,
+            lower,
+            chunk_size_cuda,
+            int(lower.shape[0]),
+            int(lower.shape[1])
+        )
+        cnt_bytes = cnt_torch.cpu().numpy().tobytes()
+        byte_stream_bytes = byte_stream_torch.cpu().numpy().tobytes()
+        len_cnt_bytes = len(cnt_bytes)
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "CUDA out of memory" in error_msg or "CUDA error" in error_msg or "illegal memory access" in error_msg:
+            # CUDA関連エラーの場合、データを分割して再試行
+            print(f"[WARNING] CUDA error detected for {file_name}: {error_msg}")
+            print(f"[INFO] Attempting to split data into smaller chunks...")
+
+            # CUDA状態をリセット
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # CUDA illegal memory accessの場合はデバイスをリセット
+            if "illegal memory access" in error_msg:
+                print("[WARNING] Illegal memory access detected. Resetting CUDA device...")
+                try:
+                    torch.cuda.reset_peak_memory_stats()
+                    torch.cuda.reset_accumulated_memory_stats()
+                except:
+                    pass
+
+            if retry_count >= max_retries:
+                raise RuntimeError(f"Failed to encode {file_name} after {max_retries} retries due to CUDA error: {error_msg}")
+
+            # データを半分に分割して再帰的に処理
+            N = len(x)
+            mid = N // 2
+
+            if mid < 100:  # 分割サイズが小さすぎる場合は諦める
+                raise RuntimeError(f"Cannot split {file_name} further (size={N}). CUDA error cannot be resolved: {error_msg}")
+
+            print(f"[INFO] Splitting {file_name} into 2 parts (size: {N} -> {mid}, {N-mid})")
+
+            # データのコピーを作成してメモリ破損を回避
+            try:
+                x_part1 = x[:mid].clone().contiguous()
+                mean_list_part1 = [mean[:mid].clone().contiguous() for mean in mean_list]
+                scale_list_part1 = [scale[:mid].clone().contiguous() for scale in scale_list]
+                prob_list_part1 = [prob[:mid].clone().contiguous() for prob in prob_list]
+                Q_part1 = Q[:mid].clone().contiguous() if isinstance(Q, torch.Tensor) else Q
+
+                x_part2 = x[mid:].clone().contiguous()
+                mean_list_part2 = [mean[mid:].clone().contiguous() for mean in mean_list]
+                scale_list_part2 = [scale[mid:].clone().contiguous() for scale in scale_list]
+                prob_list_part2 = [prob[mid:].clone().contiguous() for prob in prob_list]
+                Q_part2 = Q[mid:].clone().contiguous() if isinstance(Q, torch.Tensor) else Q
+            except RuntimeError as clone_error:
+                print(f"[ERROR] Failed to clone tensors: {clone_error}")
+                raise RuntimeError(f"Cannot recover from CUDA error for {file_name}: {error_msg}")
+
+            # 前半を処理
+            bit_len_1 = encoder_gaussian_mixed(
+                x=x_part1,
+                mean_list=mean_list_part1,
+                scale_list=scale_list_part1,
+                prob_list=prob_list_part1,
+                Q=Q_part1,
+                file_name=file_name.replace('.b', '_part0.b'),
+                retry_count=retry_count + 1,
+                max_retries=max_retries
+            )
+
+            # 後半を処理
+            bit_len_2 = encoder_gaussian_mixed(
+                x=x_part2,
+                mean_list=mean_list_part2,
+                scale_list=scale_list_part2,
+                prob_list=prob_list_part2,
+                Q=Q_part2,
+                file_name=file_name.replace('.b', '_part1.b'),
+                retry_count=retry_count + 1,
+                max_retries=max_retries
+            )
+
+            return bit_len_1 + bit_len_2
+        else:
+            raise
+
     with open(file_name, 'wb') as fout:
         fout.write(min_value.to(torch.float32).cpu().numpy().tobytes())
         fout.write(max_value.to(torch.float32).cpu().numpy().tobytes())
@@ -339,7 +426,7 @@ def encoder_gaussian_chunk(x, mean, scale, Q, file_name='tmp.b', chunk_size=1000
     return sum(bit_len_list)
 
 
-def encoder_gaussian(x, mean, scale, Q, file_name='tmp.b'):
+def encoder_gaussian(x, mean, scale, Q, file_name='tmp.b', retry_count=0, max_retries=3):
     # should be single dimension
     assert file_name.endswith('.b')
     assert len(x.shape) == 1
@@ -349,27 +436,108 @@ def encoder_gaussian(x, mean, scale, Q, file_name='tmp.b'):
     max_value = x_int_round.max()
     min_value = x_int_round.min()
 
-    lower = arithmetic.calculate_cdf(
-        mean,
-        scale,
-        Q,
-        min_value,
-        max_value
-    )
+    # 量子化後の範囲が大きすぎる場合はチェック
+    value_range = int(max_value.item() - min_value.item())
+    max_allowed_range = 100000  # メモリ制限: 範囲の上限
+    if value_range > max_allowed_range:
+        print(f"[ERROR] Quantized range too large for {file_name}: {value_range} (limit: {max_allowed_range})")
+        print(f"[ERROR] min_value={min_value.item()}, max_value={max_value.item()}, Q range: {Q.min().item():.6f}-{Q.max().item():.6f}")
+        raise RuntimeError(f"Quantization range {value_range} exceeds maximum allowed range {max_allowed_range}. Consider using larger Q values.")
 
-    x_tmp = x_int_round - min_value
-    x_tmp = torch.clamp(x_tmp, min=0, max=32767)
-    x_int_round_idx = x_tmp.to(torch.int16)
-    (byte_stream_torch, cnt_torch) = arithmetic.arithmetic_encode(
-        x_int_round_idx,
-        lower,
-        chunk_size_cuda,
-        int(lower.shape[0]),
-        int(lower.shape[1])
-    )
-    cnt_bytes = cnt_torch.cpu().numpy().tobytes()
-    byte_stream_bytes = byte_stream_torch.cpu().numpy().tobytes()
-    len_cnt_bytes = len(cnt_bytes)
+    try:
+        lower = arithmetic.calculate_cdf(
+            mean,
+            scale,
+            Q,
+            min_value,
+            max_value
+        )
+
+        x_tmp = x_int_round - min_value
+        x_tmp = torch.clamp(x_tmp, min=0, max=32767)
+        x_int_round_idx = x_tmp.to(torch.int16)
+        (byte_stream_torch, cnt_torch) = arithmetic.arithmetic_encode(
+            x_int_round_idx,
+            lower,
+            chunk_size_cuda,
+            int(lower.shape[0]),
+            int(lower.shape[1])
+        )
+        cnt_bytes = cnt_torch.cpu().numpy().tobytes()
+        byte_stream_bytes = byte_stream_torch.cpu().numpy().tobytes()
+        len_cnt_bytes = len(cnt_bytes)
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "CUDA out of memory" in error_msg or "CUDA error" in error_msg or "illegal memory access" in error_msg:
+            # CUDA関連エラーの場合、データを分割して再試行
+            print(f"[WARNING] CUDA error detected for {file_name}: {error_msg}")
+            print(f"[INFO] Attempting to split data into smaller chunks...")
+
+            # CUDA状態をリセット
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # CUDA illegal memory accessの場合はデバイスをリセット
+            if "illegal memory access" in error_msg:
+                print("[WARNING] Illegal memory access detected. Resetting CUDA device...")
+                try:
+                    torch.cuda.reset_peak_memory_stats()
+                    torch.cuda.reset_accumulated_memory_stats()
+                except:
+                    pass
+
+            if retry_count >= max_retries:
+                raise RuntimeError(f"Failed to encode {file_name} after {max_retries} retries due to CUDA error: {error_msg}")
+
+            # データを半分に分割して再帰的に処理
+            N = len(x)
+            mid = N // 2
+
+            if mid < 100:  # 分割サイズが小さすぎる場合は諦める
+                raise RuntimeError(f"Cannot split {file_name} further (size={N}). CUDA error cannot be resolved: {error_msg}")
+
+            print(f"[INFO] Splitting {file_name} into 2 parts (size: {N} -> {mid}, {N-mid})")
+
+            # データのコピーを作成してメモリ破損を回避
+            try:
+                x_part1 = x[:mid].clone().contiguous()
+                mean_part1 = mean[:mid].clone().contiguous()
+                scale_part1 = scale[:mid].clone().contiguous()
+                Q_part1 = Q[:mid].clone().contiguous() if isinstance(Q, torch.Tensor) else Q
+
+                x_part2 = x[mid:].clone().contiguous()
+                mean_part2 = mean[mid:].clone().contiguous()
+                scale_part2 = scale[mid:].clone().contiguous()
+                Q_part2 = Q[mid:].clone().contiguous() if isinstance(Q, torch.Tensor) else Q
+            except RuntimeError as clone_error:
+                print(f"[ERROR] Failed to clone tensors: {clone_error}")
+                raise RuntimeError(f"Cannot recover from CUDA error for {file_name}: {error_msg}")
+
+            # 前半を処理
+            bit_len_1 = encoder_gaussian(
+                x=x_part1,
+                mean=mean_part1,
+                scale=scale_part1,
+                Q=Q_part1,
+                file_name=file_name.replace('.b', '_part0.b'),
+                retry_count=retry_count + 1,
+                max_retries=max_retries
+            )
+
+            # 後半を処理
+            bit_len_2 = encoder_gaussian(
+                x=x_part2,
+                mean=mean_part2,
+                scale=scale_part2,
+                Q=Q_part2,
+                file_name=file_name.replace('.b', '_part1.b'),
+                retry_count=retry_count + 1,
+                max_retries=max_retries
+            )
+
+            return bit_len_1 + bit_len_2
+        else:
+            raise
     with open(file_name, 'wb') as fout:
         fout.write(min_value.to(torch.float32).cpu().numpy().tobytes())
         fout.write(max_value.to(torch.float32).cpu().numpy().tobytes())
