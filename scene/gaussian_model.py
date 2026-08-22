@@ -62,6 +62,46 @@ class GEGLUAct(nn.Module):
         x, gate = x.chunk(2, dim=-1)
         return F.gelu(x) * gate
         
+class LevelSEGate(nn.Module):
+    """SE-Net style content-based gate over hash-grid resolution levels.
+
+    Naive concat lets the downstream MLP know "which position = which level"
+    only implicitly (via fixed weight columns), and gives it no signal about
+    how the levels relate to one another in scale. This module explicitly
+    summarizes each level's own activation, mixes that summary across levels
+    (so e.g. an anomalously active fine level can be suppressed relative to
+    its coarser neighbors) together with each level's known resolution, and
+    rescales each level before concatenation. Output dim is unchanged.
+    """
+    def __init__(self, n_levels, n_features, resolutions_list, reduction=2):
+        super().__init__()
+        self.n_levels = n_levels
+        self.n_features = n_features
+        log_res = torch.log(torch.tensor(resolutions_list, dtype=torch.float32))
+        log_res = (log_res - log_res.mean()) / (log_res.std() + 1e-6)
+        self.register_buffer('log_res', log_res)  # [n_levels], fixed, not learned
+
+        hidden = max(n_levels // reduction, 4)
+        self.excite = nn.Sequential(
+            nn.Linear(n_levels * 2, hidden),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden, n_levels),
+        )
+        # start close to identity (gate ~= sigmoid(2) ~= 0.88 for every level, input-independent)
+        nn.init.zeros_(self.excite[-1].weight)
+        nn.init.constant_(self.excite[-1].bias, 2.0)
+
+    def forward(self, feat):
+        # feat: [N, n_levels * n_features]
+        N = feat.shape[0]
+        feat_l = feat.view(N, self.n_levels, self.n_features)
+        squeeze = feat_l.mean(dim=-1)  # [N, n_levels], content-dependent
+        res = self.log_res.unsqueeze(0).expand(N, -1)  # [N, n_levels], fixed
+        gate = torch.sigmoid(self.excite(torch.cat([squeeze, res], dim=-1)))  # [N, n_levels]
+        feat_l = feat_l * gate.unsqueeze(-1)
+        return feat_l.reshape(N, self.n_levels * self.n_features)
+
+
 class mix_3D2D_encoding(nn.Module):
     def __init__(
             self,
@@ -74,8 +114,14 @@ class mix_3D2D_encoding(nn.Module):
             ste_multistep,
             add_noise,
             Q,
+            plane_fusion='concat',
+            use_level_gate=False,
     ):
         super().__init__()
+        self.use_level_gate = use_level_gate
+        assert plane_fusion in ('concat', 'hadamard', 'sum'), \
+            f'unknown plane_fusion: {plane_fusion}'
+        self.plane_fusion = plane_fusion
         self.encoding_xyz = GridEncoder(
             num_dim=3,
             n_features=n_features,
@@ -116,10 +162,21 @@ class mix_3D2D_encoding(nn.Module):
             add_noise=add_noise,
             Q=Q,
         )
-        self.output_dim = self.encoding_xyz.output_dim + \
-                          self.encoding_xy.output_dim + \
-                          self.encoding_xz.output_dim + \
-                          self.encoding_yz.output_dim
+        assert self.encoding_xy.output_dim == self.encoding_xz.output_dim == self.encoding_yz.output_dim, \
+            'xy/xz/yz planes must share the same output_dim to be fused via hadamard/sum'
+        if plane_fusion == 'concat':
+            planes_dim = self.encoding_xy.output_dim + self.encoding_xz.output_dim + self.encoding_yz.output_dim
+        else:
+            # hadamard / sum fuse the 3 orthogonal planes into a single feature of one plane's width,
+            # following the tri-plane fusion used by K-Planes (hadamard) / EG3D (sum) instead of concat.
+            planes_dim = self.encoding_xy.output_dim
+        self.output_dim = self.encoding_xyz.output_dim + planes_dim
+
+        if use_level_gate:
+            self.gate_xyz = LevelSEGate(self.encoding_xyz.n_levels, n_features, resolutions_list)
+            self.gate_xy = LevelSEGate(self.encoding_xy.n_levels, n_features, resolutions_list_2D)
+            self.gate_xz = LevelSEGate(self.encoding_xz.n_levels, n_features, resolutions_list_2D)
+            self.gate_yz = LevelSEGate(self.encoding_yz.n_levels, n_features, resolutions_list_2D)
 
     def forward(self, x):
         x_x, y_y, z_z = torch.chunk(x, 3, dim=-1)
@@ -127,7 +184,18 @@ class mix_3D2D_encoding(nn.Module):
         out_xy = self.encoding_xy(torch.cat([x_x, y_y], dim=-1))  # [..., 2*4]
         out_xz = self.encoding_xz(torch.cat([x_x, z_z], dim=-1))  # [..., 2*4]
         out_yz = self.encoding_yz(torch.cat([y_y, z_z], dim=-1))  # [..., 2*4]
-        out_i = torch.cat([out_xyz, out_xy, out_xz, out_yz], dim=-1)  # [..., 56]
+        if self.use_level_gate:
+            out_xyz = self.gate_xyz(out_xyz)
+            out_xy = self.gate_xy(out_xy)
+            out_xz = self.gate_xz(out_xz)
+            out_yz = self.gate_yz(out_yz)
+        if self.plane_fusion == 'hadamard':
+            out_planes = out_xy * out_xz * out_yz
+        elif self.plane_fusion == 'sum':
+            out_planes = out_xy + out_xz + out_yz
+        else:
+            out_planes = torch.cat([out_xy, out_xz, out_yz], dim=-1)
+        out_i = torch.cat([out_xyz, out_planes], dim=-1)  # [..., 56] when concat, smaller otherwise
         return out_i
 
 class Channel_CTX_fea(nn.Module):
@@ -349,7 +417,13 @@ class CausalKNNContext(nn.Module):
                 chunk_size: int = 3000) -> torch.Tensor:
         """hash_feats / anchor_pos は Morton 順ソート済みであること。"""
         causal_ctx = self._aggregate_causal(hash_feats, anchor_pos, chunk_size)
-        return self.apply_fusion(hash_feats, causal_ctx)
+        # apply_fusion をチャンク処理してOOMを防ぐ
+        N = hash_feats.shape[0]
+        out = torch.empty_like(hash_feats)
+        for s in range(0, N, chunk_size):
+            e = min(s + chunk_size, N)
+            out[s:e] = self.apply_fusion(hash_feats[s:e], causal_ctx[s:e])
+        return out
 
 
 class AnchorCondNorm(nn.Module):
@@ -432,6 +506,8 @@ class GaussianModel(nn.Module):
                  add_noise: bool=False,
                  Q=1,
                  use_2D: bool=True,
+                 plane_fusion: str='concat',
+                 use_level_gate: bool=False,
                  decoded_version: bool=False,
                  is_synthetic_nerf: bool=False,
                  use_gated_mlp: bool=False,
@@ -447,7 +523,8 @@ class GaussianModel(nn.Module):
         print('hash_params:', use_2D, n_features_per_level,
               log2_hashmap_size, resolutions_list,
               log2_hashmap_size_2D, resolutions_list_2D,
-              ste_binary, ste_multistep, add_noise)
+              ste_binary, ste_multistep, add_noise, 'plane_fusion=', plane_fusion,
+              'use_level_gate=', use_level_gate)
 
         self.feat_dim = feat_dim
         self.n_offsets = n_offsets
@@ -468,6 +545,8 @@ class GaussianModel(nn.Module):
         self.add_noise = add_noise
         self.Q = Q
         self.use_2D = use_2D
+        self.plane_fusion = plane_fusion
+        self.use_level_gate = use_level_gate
         self.decoded_version = decoded_version
         self.use_gated_mlp = use_gated_mlp
         self.use_spatial_context = use_spatial_context
@@ -510,6 +589,8 @@ class GaussianModel(nn.Module):
                 ste_multistep=ste_multistep,
                 add_noise=add_noise,
                 Q=Q,
+                plane_fusion=plane_fusion,
+                use_level_gate=use_level_gate,
             ).cuda()
         else:
             self.encoding_xyz = GridEncoder(
@@ -1226,6 +1307,7 @@ class GaussianModel(nn.Module):
 
                 new_opacities = inverse_sigmoid(0.1 * torch.ones((candidate_anchor.shape[0], 1), dtype=torch.float, device="cuda"))
 
+                torch.cuda.empty_cache()
                 new_feat = self._anchor_feat.unsqueeze(dim=1).repeat([1, self.n_offsets, 1]).view([-1, self.feat_dim])[candidate_mask]
                 new_feat = scatter_max(new_feat, inverse_indices.unsqueeze(1).expand(-1, new_feat.size(1)), dim=0)[0][remove_duplicates]
 
@@ -1410,44 +1492,70 @@ class GaussianModel(nn.Module):
                 _grid_offsets[sorted_indices],
             )[unsort_indices]
 
-        if self.use_causal_knn:
-            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                self.forward_grid(feat_context)
-        else:
-            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
-                self.forward_grid(feat_context_no_cond)
-            mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
-                self.forward_grid(feat_context_with_scale_offset)
+        # MLP + entropy を chunk で処理して OOM を回避
+        # feat_context / feat_context_{no_cond,with_scale_offset} は全体を事前計算済み
+        # (causal_knn は全アンカー依存のため chunking 不可) → それ以降だけ分割
+        _Q_feat_base    = Q_feat      # scalar
+        _Q_scaling_base = Q_scaling   # scalar
+        _Q_offsets_base = Q_offsets   # scalar
 
-        Q_feat_adj    = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
-        Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
-        Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
-        Q_feat    = torch.clamp(Q_feat    * (1 + torch.tanh(Q_feat_adj)),    min=1e-4)
-        Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=1e-5)
-        Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=1e-4)
+        N = _feat.shape[0]
+        CHUNK = MAX_batch_size  # reuse the same batch-size knob
+        total_feat_bits = 0.0
+        total_scaling_bits = 0.0
+        total_offsets_bits = 0.0
 
-        _feat = (STE_multistep.apply(_feat, Q_feat)).detach()
-        mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
-        probs = torch.softmax(torch.stack([prob, prob_adj], dim=-1), dim=-1)
+        for s in range(0, N, CHUNK):
+            e = min(s + CHUNK, N)
 
-        mean_scaling  = mean_scaling.contiguous().view(-1)
-        scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-        mean_offsets  = mean_offsets.contiguous().view(-1)
-        scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-        scale         = torch.clamp(scale, min=1e-9)
+            feat_c     = _feat[s:e]
+            scaling_c  = _scaling[s:e]
+            offsets_c  = _grid_offsets[s:e]
+            mask_c     = _mask[s:e]
 
-        grid_scaling = (STE_multistep.apply(_scaling.view(-1), Q_scaling)).detach()
-        offsets      = (STE_multistep.apply(_grid_offsets.view(-1, 3 * self.n_offsets).view(-1), Q_offsets)).detach()
-        mask_tmp     = _mask.repeat(1, 1, 3).view(-1, 3 * self.n_offsets).view(-1)
+            if self.use_causal_knn:
+                ctx_c = feat_context[s:e]
+                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                    self.forward_grid(ctx_c)
+            else:
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                    self.forward_grid(feat_context_no_cond[s:e])
+                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                    self.forward_grid(feat_context_with_scale_offset[s:e])
 
-        bit_feat = self.EG_mix_prob_2.forward(
-            _feat, mean, mean_adj, scale, scale_adj,
-            probs[..., 0], probs[..., 1], Q=Q_feat)
-        bit_scaling = self.entropy_gaussian.forward(grid_scaling, mean_scaling, scale_scaling, Q_scaling)
-        bit_offsets = self.entropy_gaussian.forward(offsets, mean_offsets, scale_offsets, Q_offsets)
-        bit_offsets = bit_offsets * mask_tmp
+            Q_feat_adj    = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+            Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
+            Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
+            Qf = torch.clamp(_Q_feat_base    * (1 + torch.tanh(Q_feat_adj)),    min=1e-4)
+            Qs = torch.clamp(_Q_scaling_base * (1 + torch.tanh(Q_scaling_adj)), min=1e-5)
+            Qo = torch.clamp(_Q_offsets_base * (1 + torch.tanh(Q_offsets_adj)), min=1e-4)
 
-        return torch.sum(bit_feat).item(), torch.sum(bit_scaling).item(), torch.sum(bit_offsets).item()
+            feat_q = (STE_multistep.apply(feat_c, Qf)).detach()
+            mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_q, torch.cat([mean, scale, prob], dim=-1))
+            probs = torch.softmax(torch.stack([prob, prob_adj], dim=-1), dim=-1)
+
+            mean_s  = mean_scaling.contiguous().view(-1)
+            scale_s = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+            mean_o  = mean_offsets.contiguous().view(-1)
+            scale_o = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
+            scale   = torch.clamp(scale, min=1e-9)
+
+            gs = (STE_multistep.apply(scaling_c.view(-1), Qs)).detach()
+            go = (STE_multistep.apply(offsets_c.view(-1, 3 * self.n_offsets).view(-1), Qo)).detach()
+            mask_tmp = mask_c.repeat(1, 1, 3).view(-1, 3 * self.n_offsets).view(-1)
+
+            bf = self.EG_mix_prob_2.forward(
+                feat_q, mean, mean_adj, scale, scale_adj,
+                probs[..., 0], probs[..., 1], Q=Qf)
+            bs = self.entropy_gaussian.forward(gs, mean_s, scale_s, Qs)
+            bo = self.entropy_gaussian.forward(go, mean_o, scale_o, Qo)
+            bo = bo * mask_tmp
+
+            total_feat_bits    += torch.sum(bf).item()
+            total_scaling_bits += torch.sum(bs).item()
+            total_offsets_bits += torch.sum(bo).item()
+
+        return total_feat_bits, total_scaling_bits, total_offsets_bits
 
     @torch.no_grad()
     def estimate_final_bits(self):
@@ -1563,7 +1671,7 @@ class GaussianModel(nn.Module):
         npz_path = os.path.join(pre_path_name, 'xyz_gpcc.npz')
         if self.use_reno:
             from utils.reno_utils import compress_reno
-            means_strings = compress_reno(_anchor_int, ckpt_path=self.reno_ckpt_path)
+            means_strings = compress_reno(_anchor_int, ckpt_path=self.reno_ckpt_path, verbose=True)
         else:
             means_strings = compress_gpcc(_anchor_int)
         np.savez_compressed(npz_path, voxel_size=self.voxel_size, means_strings=means_strings)
@@ -1823,7 +1931,7 @@ class GaussianModel(nn.Module):
         means_strings = data_dict['means_strings'].tobytes()
         if self.use_reno:
             from utils.reno_utils import decompress_reno
-            _anchor_int_dec = decompress_reno(means_strings, ckpt_path=self.reno_ckpt_path).to('cuda')
+            _anchor_int_dec = decompress_reno(means_strings, ckpt_path=self.reno_ckpt_path, verbose=True).to('cuda')
         else:
             _anchor_int_dec = decompress_gpcc(means_strings).to('cuda')
         sorted_indices = calculate_morton_order(_anchor_int_dec)

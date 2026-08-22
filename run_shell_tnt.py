@@ -3,7 +3,7 @@ from datetime import datetime
 
 # Set environment variable to force compatible CUDA architecture
 # This is a workaround for newer GPUs (Compute Capability 8.9) with older PyTorch
-os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6'
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9'
 
 # Random seed for reproducibility
 RANDOM_SEED = 42

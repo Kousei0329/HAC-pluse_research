@@ -1,5 +1,7 @@
 import os
 
+os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0;8.6;8.9"
+
 for lmbda in [0.004]:  # Optionally, you can try: 0.003, 0.002, 0.001, 0.0005
     for cuda, scene in enumerate(['bicycle', 'garden', 'stump', 'room', 'counter', 'kitchen', 'bonsai', 'flowers', 'treehill']):
         mask_lr_final = 0.0005 * lmbda / 0.001

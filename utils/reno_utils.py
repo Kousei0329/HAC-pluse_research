@@ -14,6 +14,8 @@ Dependencies (must be installed in the active environment):
 import io as _io
 import os as _os
 import sys
+import time as _time
+from collections import defaultdict
 
 import numpy as np
 import torch
@@ -23,6 +25,39 @@ RENO_ROOT = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__f
 
 # Module-level cache: (ckpt_path, channels, kernel_size) -> Network
 _net_cache: dict = {}
+
+# Populated by the most recent compress_reno()/decompress_reno() call made with
+# verbose=True. {stage_name: seconds}
+_last_profile: dict = {}
+
+
+def get_last_profile() -> dict:
+    """Return the per-stage timing breakdown from the last verbose=True call."""
+    return dict(_last_profile)
+
+
+class _StageTimer:
+    """Accumulates wall-clock time per named stage, synchronizing CUDA at each boundary."""
+
+    def __init__(self):
+        self.totals: dict = defaultdict(float)
+        self._t0 = None
+
+    def tic(self) -> None:
+        torch.cuda.synchronize()
+        self._t0 = _time.time()
+
+    def toc(self, stage: str) -> None:
+        torch.cuda.synchronize()
+        self.totals[stage] += _time.time() - self._t0
+        self._t0 = _time.time()
+
+    def report(self, label: str) -> None:
+        global _last_profile
+        _last_profile = dict(self.totals)
+        total = sum(self.totals.values())
+        parts = ', '.join(f'{k}={v:.4f}' for k, v in self.totals.items())
+        print(f'[RENO] {label} breakdown (s): {parts}, total={total:.4f}')
 
 
 def ensure_path() -> None:
@@ -72,11 +107,15 @@ def compress_reno(
     ckpt_path: str = f'{RENO_ROOT}/model/Ford/ckpt.pt',
     channels: int = 32,
     kernel_size: int = 3,
+    verbose: bool = False,
 ) -> bytes:
     """Compress integer grid coordinates [N, 3] with RENO.
 
     x may contain negative values; coordinates are shifted to non-negative
     internally and the shift is stored in the bitstream header.
+
+    If verbose=True, prints a per-stage timing breakdown (also retrievable
+    afterwards via get_last_profile()).
 
     Returns raw bytes compatible with decompress_reno().
     """
@@ -88,7 +127,11 @@ def compress_reno(
     net = _get_net(ckpt_path, channels, kernel_size)
     net.eval()
 
+    timer = _StageTimer() if verbose else None
+
     with torch.no_grad():
+        if timer: timer.tic()
+
         x = x.long().cuda()
 
         # RENO requires non-negative coordinates.
@@ -101,6 +144,8 @@ def compress_reno(
         feats = torch.ones((N, 1), dtype=torch.float, device='cuda')
         sparse_x = SparseTensor(coords=coords, feats=feats)
 
+        if timer: timer.toc('setup')
+
         # ── Multi-scale downscaling via FOG ──────────────────────────────
         data_ls = []
         while True:
@@ -110,6 +155,8 @@ def compress_reno(
                 break
         data_ls = data_ls[::-1]  # index 0 = coarsest level
 
+        if timer: timer.toc('fog')
+
         # ── Neural encoding with arithmetic coding ───────────────────────
         byte_stream_ls = []
         for depth in range(len(data_ls) - 1):
@@ -117,15 +164,24 @@ def compress_reno(
             gt_C, gt_O = data_ls[depth + 1]
             gt_C, gt_O = op.sort_CF(gt_C, gt_O)
 
+            if timer: timer.tic()
+
             x_F = net.prior_embedding(x_O.int()).view(-1, net.channels)
             cur = SparseTensor(coords=x_C, feats=x_F)
             cur = net.prior_resnet(cur)
 
+            if timer: timer.toc('prior')
+
             x_up_C, x_up_F = net.fcg(x_C, x_O, cur.feats)
             x_up_C, x_up_F = op.sort_CF(x_up_C, x_up_F)
+
+            if timer: timer.toc('fcg')
+
             x_up_F = net.target_embedding(x_up_F, x_up_C)
             x_up = SparseTensor(coords=x_up_C, feats=x_up_F)
             x_up = net.target_resnet(x_up)
+
+            if timer: timer.toc('target')
 
             gt_O_s0 = torch.remainder(gt_O, 16)
             gt_O_s1 = torch.div(gt_O, 16, rounding_mode='floor')
@@ -133,6 +189,8 @@ def compress_reno(
             prob_s0 = net.pred_head_s0(x_up.feats)
             prob_s1 = net.pred_head_s1(
                 x_up.feats + net.pred_head_s1_emb(gt_O_s0[:, 0].long()))
+
+            if timer: timer.toc('pred_head')
 
             prob = torch.cat((prob_s0, prob_s1), dim=0)
             gt = torch.cat((gt_O_s0, gt_O_s1), dim=0)
@@ -142,11 +200,17 @@ def compress_reno(
             cdf_norm = op._convert_to_int_and_normalize(cdf, True).cpu()
             gt_cpu = gt[:, 0].to(torch.int16).cpu()
 
+            if timer: timer.toc('cdf_prep')
+
             half = gt_cpu.shape[0] // 2
             byte_stream_ls.append(
                 torchac.encode_int16_normalized_cdf(cdf_norm[:half], gt_cpu[:half]))
             byte_stream_ls.append(
                 torchac.encode_int16_normalized_cdf(cdf_norm[half:], gt_cpu[half:]))
+
+            if timer: timer.toc('torchac_enc')
+
+        if timer: timer.tic()
 
         byte_stream = op.pack_byte_stream_ls(byte_stream_ls)
 
@@ -166,7 +230,13 @@ def compress_reno(
         buf.write(base_C_np.tobytes())                               # base_len*12 B
         buf.write(base_F_np.tobytes())                               # base_len*1 B
         buf.write(byte_stream)
-        return buf.getvalue()
+        result = buf.getvalue()
+
+        if timer:
+            timer.toc('pack_io')
+            timer.report('compress_reno')
+
+        return result
 
 
 def decompress_reno(
@@ -174,8 +244,13 @@ def decompress_reno(
     ckpt_path: str = f'{RENO_ROOT}/model/Ford/ckpt.pt',
     channels: int = 32,
     kernel_size: int = 3,
+    verbose: bool = False,
 ) -> torch.Tensor:
     """Decompress bytes produced by compress_reno().
+
+    If verbose=True, prints a per-stage timing breakdown (also retrievable
+    afterwards via get_last_profile()), using the same stage names as
+    compress_reno() so the two can be compared directly.
 
     Returns float32 tensor of shape [N, 3] containing the original
     integer grid coordinates (same dtype/range as compress_reno input).
@@ -188,7 +263,11 @@ def decompress_reno(
     net = _get_net(ckpt_path, channels, kernel_size)
     net.eval()
 
+    timer = _StageTimer() if verbose else None
+
     with torch.no_grad():
+        if timer: timer.tic()
+
         buf = _io.BytesIO(strings)
 
         # Parse header
@@ -210,40 +289,75 @@ def decompress_reno(
             feats=base_F)
         byte_stream_ls = op.unpack_byte_stream(byte_stream)
 
+        if timer: timer.toc('header_io')
+
         # ── Multi-stage arithmetic decoding ──────────────────────────────
         for idx in range(0, len(byte_stream_ls), 2):
             bs_s0 = byte_stream_ls[idx]
             bs_s1 = byte_stream_ls[idx + 1]
 
+            if timer: timer.tic()
+
             x_O = x.feats.int()
             x.feats = net.prior_embedding(x_O).view(-1, net.channels)
             x = net.prior_resnet(x)
 
+            if timer: timer.toc('prior')
+
             x_up_C, x_up_F = net.fcg(x.coords, x_O, x_F=x.feats)
             x_up_C, x_up_F = op.sort_CF(x_up_C, x_up_F)
+
+            if timer: timer.toc('fcg')
+
             x_up_F = net.target_embedding(x_up_F, x_up_C)
             x_up = SparseTensor(coords=x_up_C, feats=x_up_F)
             x_up = net.target_resnet(x_up)
 
+            if timer: timer.toc('target')
+
             prob_s0 = net.pred_head_s0(x_up.feats)
+
+            if timer: timer.toc('pred_head')
+
             cdf_s0 = torch.cat((prob_s0[:, 0:1] * 0, prob_s0.cumsum(dim=-1)), dim=-1)
             cdf_s0 = torch.clamp(cdf_s0, 0.0, 1.0)
             cdf_s0_norm = op._convert_to_int_and_normalize(cdf_s0, True).cpu()
+
+            if timer: timer.toc('cdf_prep')
+
             x_up_O_s0 = torchac.decode_int16_normalized_cdf(cdf_s0_norm, bs_s0).cuda()
+
+            if timer: timer.toc('torchac_dec')
 
             prob_s1 = net.pred_head_s1(
                 x_up.feats + net.pred_head_s1_emb(x_up_O_s0.long()))
+
+            if timer: timer.toc('pred_head')
+
             cdf_s1 = torch.cat((prob_s1[:, 0:1] * 0, prob_s1.cumsum(dim=-1)), dim=-1)
             cdf_s1 = torch.clamp(cdf_s1, 0.0, 1.0)
             cdf_s1_norm = op._convert_to_int_and_normalize(cdf_s1, True).cpu()
+
+            if timer: timer.toc('cdf_prep')
+
             x_up_O_s1 = torchac.decode_int16_normalized_cdf(cdf_s1_norm, bs_s1).cuda()
+
+            if timer: timer.toc('torchac_dec')
 
             x_up_O = x_up_O_s1 * 16 + x_up_O_s0
             x = SparseTensor(coords=x_up_C, feats=x_up_O.unsqueeze(-1))
+
+        if timer: timer.tic()
 
         # Final coordinate expansion (FCG outputs [N, 4]: batch + xyz)
         scan = net.fcg(x.C, x.F)
         coords_shifted = (scan[:, 1:] * posQ).long()   # [N, 3] non-negative
 
         # Restore original coordinate range
-        return (coords_shifted + shift).float()
+        result = (coords_shifted + shift).float()
+
+        if timer:
+            timer.toc('fcg')
+            timer.report('decompress_reno')
+
+        return result

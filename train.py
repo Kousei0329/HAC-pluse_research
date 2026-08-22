@@ -116,6 +116,8 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             n_features_per_level=args_param.n_features,
             log2_hashmap_size=args_param.log2,
             log2_hashmap_size_2D=args_param.log2_2D,
+            plane_fusion=args_param.plane_fusion,
+            use_level_gate=args_param.use_level_gate,
             is_synthetic_nerf=is_synthetic_nerf,
             use_hierarchical=dataset.use_hierarchical,
             level1_voxel_scale=dataset.level1_voxel_scale,
@@ -141,6 +143,8 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             n_features_per_level=args_param.n_features,
             log2_hashmap_size=args_param.log2,
             log2_hashmap_size_2D=args_param.log2_2D,
+            plane_fusion=args_param.plane_fusion,
+            use_level_gate=args_param.use_level_gate,
             is_synthetic_nerf=is_synthetic_nerf,
             use_gated_mlp=args_param.use_gated_mlp,
             use_spatial_context=args_param.use_spatial_context,
@@ -156,6 +160,7 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
     gaussians.training_setup(opt)
 
     reno_optimizer = None
+    _reno_avg_bpp = None  # last RENO bpp measurement, used as a frozen per-anchor rate price in the main loss
     if args_param.use_reno and args_param.train_reno:
         from utils.reno_utils import get_reno_net
         _reno_net = get_reno_net(args_param.reno_ckpt_path)
@@ -265,6 +270,21 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             denom = gaussians._anchor.shape[0]*(gaussians.feat_dim+6+3*gaussians.n_offsets)
             loss = loss + args_param.lmbda * (bit_per_param + bit_hash_grid / denom)
 
+            if reno_optimizer is not None and _reno_avg_bpp is not None:
+                # RENO's bpp isn't end-to-end differentiable w.r.t. which anchors are kept: the
+                # vendored network derives occupancy purely from hard integer coordinates
+                # (submodules/reno/network.py forward() discards the `feats` field entirely), so
+                # there's no gradient path from "drop this anchor" to "bpp goes down". Instead we
+                # treat the last empirically measured RENO bpp as a frozen price-per-anchor and
+                # charge it against the differentiable (STE) anchor count, so lambda gives the mask
+                # a direct incentive to prune anchors whose position-coding cost isn't earning its
+                # keep, calibrated to RENO's actual measured compression efficiency.
+                anchor_count_soft = gaussians.get_mask_anchor.sum()
+                loss = loss + args_param.lmbda * (_reno_avg_bpp * anchor_count_soft / denom)
+
+                if iteration % 1000 == 0:
+                    logger.info(f"\n-----[ITER {iteration}] RENO anchor rate term: avg_bpp_per_anchor={_reno_avg_bpp:.4f}, anchor_count_soft={anchor_count_soft.item():.1f}-----")
+
         loss.backward()
 
         # ★ ここからデバッグ
@@ -360,12 +380,24 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
                 _F.conv_config.set_global_conv_config(_cfg)
 
                 with torch.no_grad():
-                    _anchor = gaussians.get_anchor.detach()
+                    # Match the anchor set actually used at encode time (estimate_final_bits /
+                    # conduct_encoding both filter by get_mask_anchor): otherwise RENO is fine-tuned
+                    # on ~20% more anchors than what conduct_encoding() will compress, and the bpp
+                    # measured during training understates the real encoded bpp.
+                    _mask_anchor = gaussians.get_mask_anchor.detach().to(torch.bool)[:, 0]
+                    _anchor = gaussians.get_anchor[_mask_anchor].detach()
                     _anchor_int = torch.round(_anchor / gaussians.voxel_size).int()
                     _shift = _anchor_int.min(dim=0)[0]
                     _anchor_shifted = (_anchor_int - _shift)
                     _coords = torch.cat((_anchor_shifted[:, :1] * 0, _anchor_shifted), dim=-1).int()
                     _feats = torch.ones((_coords.shape[0], 1), device='cuda')
+
+                    # Subsample to avoid OOM on large scenes; bpp estimate is still valid with a subset
+                    _MAX_RENO_ANCHORS = 20_000
+                    if _coords.shape[0] > _MAX_RENO_ANCHORS:
+                        _sub_idx = torch.randperm(_coords.shape[0], device='cuda')[:_MAX_RENO_ANCHORS]
+                        _coords = _coords[_sub_idx]
+                        _feats = _feats[_sub_idx]
 
                 with torch.enable_grad():
                     _reno_net.train()
@@ -373,6 +405,7 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
                     _bpp = _reno_net(_ST(coords=_coords, feats=_feats))
                     _bpp.backward()
                 reno_optimizer.step()
+                _reno_avg_bpp = _bpp.item()  # frozen price-per-anchor for next iterations' rate loss
 
                 if iteration % (args_param.reno_train_interval * 10) == 0:
                     logger.info(f"[RENO] iter={iteration} bpp={_bpp.item():.4f} anchor_num={_coords.shape[0]}")
@@ -586,6 +619,8 @@ def render_sets(args_param, dataset : ModelParams, iteration : int, pipeline : P
             n_features_per_level=args_param.n_features,
             log2_hashmap_size=args_param.log2,
             log2_hashmap_size_2D=args_param.log2_2D,
+            plane_fusion=args_param.plane_fusion,
+            use_level_gate=args_param.use_level_gate,
             decoded_version=run_codec,
             is_synthetic_nerf=is_synthetic_nerf,
             use_gated_mlp=args_param.use_gated_mlp,
@@ -743,9 +778,22 @@ if __name__ == "__main__":
     parser.add_argument("--log2_2D", type=int, default = 15)
     parser.add_argument("--n_features", type=int, default = 4)
     parser.add_argument("--lmbda", type=float, default = 0.001)
+
+    parser.add_argument("--plane_fusion", type=str, default='concat', choices=['concat', 'hadamard', 'sum'],
+                        help='How to combine the xy/xz/yz 2D hash-grid planes: '
+                             '"concat" (original HAC++ behavior), '
+                             '"hadamard" (elementwise product, K-Planes style), '
+                             '"sum" (elementwise sum, EG3D style)')
+    parser.add_argument('--use_level_gate', action='store_true', default=True,
+                        help='Enable SE-Net style content-based gating across each hash grid\'s '
+                             'resolution levels (xyz/xy/xz/yz independently) before concatenation, '
+                             'conditioned on each level\'s own activation and known resolution')
+    
+    
     parser.add_argument("--use_gated_mlp", action='store_true', default=False, help='Use gated MLP for channel context')
     parser.add_argument("--use_spatial_context", action='store_true', default=False, help='Use spatial context module for hash features')
     parser.add_argument('--use_joint_context', action='store_true', default=False, help='Use joint context module for joint features')
+    
     parser.add_argument('--use_anchor_cond_norm', action='store_true', default=True, help='Condition hash grid features on anchor scale/offset via FiLM normalization')
     parser.add_argument('--use_causal_knn', action='store_true', default=True, help='Enable causal K-NN context aggregation for hash grid features (Morton order)')
     parser.add_argument("--seed", type=int, default=0, help='Random seed for reproducibility')

@@ -5,7 +5,8 @@ import time
 import json
 from pathlib import Path
 
-os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6'
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9'
+os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
 
 # --- Global Settings ---
 LAMBDAS = [0.001, 0.002, 0.003, 0.004, 0.005]
@@ -67,7 +68,8 @@ DATASET_CONFIGS = {
 # To run specific scenes only, use a dict: {'tandt': ['truck'], 'db': ['playroom']}
 '''ここで実験したいシーンを選択する。全てのシーンを実験したい場合は、単にデータセット名をリストに入れる。'''
 # ACTIVE_DATASETS = ['tandt', 'db', 'mipnerf360', 'nerf_synthetic', 'bungeenerf']  # <- edit this list to change what runs
-ACTIVE_DATASETS = ['tandt']  # <- edit this list to change what runs
+ACTIVE_DATASETS = [   'nerf_synthetic', 'bungeenerf']  # <- edit this list to change what runs
+# ACTIVE_DATASETS = ['tandt']  # <- edit this list to change what runs
 
 # Create experiment directory with timestamp
 TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -110,6 +112,7 @@ def create_command(lmbda, scene, dataset_name, gpu_id, seed):
         f'--lmbda {lmbda} '
         f'--mask_lr_final {mask_lr_final} '
         f'--seed {seed} '
+
     )
     return cmd, output_path
 
