@@ -26,7 +26,7 @@ from utils.general_utils import (build_scaling_rotation, get_expon_lr_func,
                                  inverse_sigmoid, strip_symmetric)
 from utils.graphics_utils import BasicPointCloud
 from utils.system_utils import mkdir_p
-from utils.entropy_models import Entropy_bernoulli, Entropy_gaussian, Entropy_factorized, Entropy_gaussian_mix_prob_2
+from utils.entropy_models import Entropy_bernoulli, Entropy_gaussian, Entropy_factorized, Entropy_gaussian_mix_prob_2, Entropy_gaussian_mix_prob_3
 
 from utils.encodings import \
     STE_binary, STE_multistep, Quantize_anchor, \
@@ -61,6 +61,84 @@ class GEGLUAct(nn.Module):
     def forward(self, x):
         x, gate = x.chunk(2, dim=-1)
         return F.gelu(x) * gate
+
+
+def _prune_linear_geglu_pair(lin_prev: nn.Linear, lin_next: nn.Linear, ratio: float, min_keep: int = 8):
+    """Structurally removes the least-important GEGLU hidden units between two Linear layers.
+
+    lin_prev outputs 2*H (H value channels followed by H gate channels, per GEGLUAct's chunk
+    convention); lin_next consumes the H-wide GEGLUAct output. Importance of unit i is the L1
+    norm of lin_next's incoming column i -- a unit whose output barely reaches anything
+    downstream is safe to drop regardless of its own incoming weights. Returns freshly-sized
+    Linear modules with copied weights (unchanged originals if ratio rounds to zero prunable
+    units).
+    """
+    H = lin_prev.out_features // 2
+    assert lin_next.in_features == H, f'expected GEGLU pairing, got {lin_prev.out_features} -> {lin_next.in_features}'
+    with torch.no_grad():
+        importance = lin_next.weight.abs().sum(dim=0)  # [H]
+    keep = max(min_keep, H - int(round(H * ratio)))
+    keep = min(keep, H)
+    if keep >= H:
+        return lin_prev, lin_next, H, H
+    keep_idx = torch.argsort(importance, descending=True)[:keep]
+    keep_idx = torch.sort(keep_idx).values
+
+    device = lin_prev.weight.device
+    new_prev = nn.Linear(lin_prev.in_features, keep * 2).to(device)
+    new_next = nn.Linear(keep, lin_next.out_features).to(device)
+    with torch.no_grad():
+        new_prev.weight.copy_(torch.cat([lin_prev.weight[keep_idx], lin_prev.weight[H:][keep_idx]], dim=0))
+        new_prev.bias.copy_(torch.cat([lin_prev.bias[keep_idx], lin_prev.bias[H:][keep_idx]], dim=0))
+        new_next.weight.copy_(lin_next.weight[:, keep_idx])
+        new_next.bias.copy_(lin_next.bias)
+    return new_prev, new_next, H, keep
+
+
+def _resize_module_to_state_dict_(module: nn.Module, state_dict: dict):
+    """Rebuilds any nn.Linear inside `module` whose shape doesn't match the corresponding
+    '<dotted.path>.weight' tensor in `state_dict`, so a subsequent load_state_dict succeeds even
+    when the checkpoint was saved after structured pruning shrank some Linear layers. No-op for
+    any Linear whose shape already matches (e.g. no pruning was applied)."""
+    device = next(module.parameters()).device
+
+    def _navigate(root, parts):
+        obj = root
+        for p in parts:
+            obj = obj[int(p)] if isinstance(obj, nn.Sequential) and p.isdigit() else getattr(obj, p)
+        return obj
+
+    for key, tensor in state_dict.items():
+        if not key.endswith('.weight') or tensor.dim() != 2:
+            continue
+        parts = key[:-len('.weight')].split('.')
+        target = _navigate(module, parts)
+        if isinstance(target, nn.Linear) and target.weight.shape != tensor.shape:
+            out_f, in_f = tensor.shape
+            new_lin = nn.Linear(in_f, out_f).to(device)
+            parent = _navigate(module, parts[:-1]) if len(parts) > 1 else module
+            last = parts[-1]
+            if isinstance(parent, nn.Sequential) and last.isdigit():
+                parent[int(last)] = new_lin
+            else:
+                setattr(parent, last, new_lin)
+
+
+def _prune_sequential_geglu_(seq: nn.Sequential, ratio: float):
+    """Prunes every Linear-GEGLUAct-Linear stage inside an nn.Sequential in place, stepping by 2
+    so each interior Linear is treated as `prev` once and `next` once (its in/out width can
+    shrink independently on each side). Returns (params_before, params_after)."""
+    total_before = sum(p.numel() for p in seq.parameters())
+    n = len(seq)
+    i = 0
+    while i + 2 < n:
+        if isinstance(seq[i], nn.Linear) and isinstance(seq[i + 1], GEGLUAct) and isinstance(seq[i + 2], nn.Linear):
+            new_prev, new_next, _, _ = _prune_linear_geglu_pair(seq[i], seq[i + 2], ratio)
+            seq[i] = new_prev
+            seq[i + 2] = new_next
+        i += 2
+    total_after = sum(p.numel() for p in seq.parameters())
+    return total_before, total_after
         
 class LevelSEGate(nn.Module):
     """SE-Net style content-based gate over hash-grid resolution levels.
@@ -98,6 +176,11 @@ class LevelSEGate(nn.Module):
         squeeze = feat_l.mean(dim=-1)  # [N, n_levels], content-dependent
         res = self.log_res.unsqueeze(0).expand(N, -1)  # [N, n_levels], fixed
         gate = torch.sigmoid(self.excite(torch.cat([squeeze, res], dim=-1)))  # [N, n_levels]
+        # Cached (no grad, cheap) so callers can check whether this has learned anything beyond
+        # its near-identity init (gate ~= 0.881 for every level, input-independent) -- see
+        # gaussian_renderer/__init__.py's periodic debug print.
+        self._last_gate_mean = gate.mean(dim=0).detach()
+        self._last_gate_std = gate.std(dim=0).detach()
         feat_l = feat_l * gate.unsqueeze(-1)
         return feat_l.reshape(N, self.n_levels * self.n_features)
 
@@ -199,57 +282,73 @@ class mix_3D2D_encoding(nn.Module):
         return out_i
 
 class Channel_CTX_fea(nn.Module):
-    def __init__(self):
+    """Autoregressive per-channel-group context for feat's entropy model.
+
+    n_mix=2 (default, original behavior): outputs one adjustment set (mean_adj, scale_adj,
+    prob_adj), combined with mlp_grid's own (mean, scale, prob) into a 2-component mixture.
+    n_mix=3: outputs two adjustment sets, for a 3-component mixture (Entropy_gaussian_mix_prob_3),
+    using the same autoregressive context (Entropy_gaussian_mix_prob_3 is already implemented in
+    utils/entropy_models.py but was never wired up to a source of a 3rd component before).
+    """
+    def __init__(self, n_mix: int = 2):
         super().__init__()
+        assert n_mix in (2, 3), f'Channel_CTX_fea only supports n_mix in (2, 3), got {n_mix}'
+        self.n_mix = n_mix
+        n_adj = n_mix - 1  # number of (mean,scale,prob) adjustment sets this module produces
+        out_per_group = 10 * 3 * n_adj
+        # Widened (2x hidden) and deepened (+1 hidden layer), matching mlp_grid's capacity bump.
         self.MLP_d0 = nn.Sequential(
-            nn.Linear(50*3+10*0, 20*4),
+            nn.Linear(50*3+10*0, 20*8),
             GEGLUAct(),
-            nn.Linear(20*2, 10*3),
+            nn.Linear(20*4, 20*8),
+            GEGLUAct(),
+            nn.Linear(20*4, out_per_group),
         )
         self.MLP_d1 = nn.Sequential(
-            nn.Linear(50*3+10*1, 20*4),
+            nn.Linear(50*3+10*1, 20*8),
             GEGLUAct(),
-            nn.Linear(20*2, 10*3),
+            nn.Linear(20*4, 20*8),
+            GEGLUAct(),
+            nn.Linear(20*4, out_per_group),
         )
         self.MLP_d2 = nn.Sequential(
-            nn.Linear(50*3+10*2, 20*4),
+            nn.Linear(50*3+10*2, 20*8),
             GEGLUAct(),
-            nn.Linear(20*2, 10*3),
+            nn.Linear(20*4, 20*8),
+            GEGLUAct(),
+            nn.Linear(20*4, out_per_group),
         )
         self.MLP_d3 = nn.Sequential(
-            nn.Linear(50*3+10*3, 20*4),
+            nn.Linear(50*3+10*3, 20*8),
             GEGLUAct(),
-            nn.Linear(20*2, 10*3),
+            nn.Linear(20*4, 20*8),
+            GEGLUAct(),
+            nn.Linear(20*4, out_per_group),
         )
         self.MLP_d4 = nn.Sequential(
-            nn.Linear(50*3+10*4, 20*4),
+            nn.Linear(50*3+10*4, 20*8),
             GEGLUAct(),
-            nn.Linear(20*2, 10*3),
+            nn.Linear(20*4, 20*8),
+            GEGLUAct(),
+            nn.Linear(20*4, out_per_group),
         )
 
     def forward(self, fea_q, mean_scale, to_dec=-1):  # chctx_v3
         # fea_q: [N, 50]
+        n_adj = self.n_mix - 1
         d0, d1, d2, d3, d4 = torch.split(fea_q, split_size_or_sections=[10, 10, 10, 10, 10], dim=-1)
-        mean_d0, scale_d0, prob_d0 = torch.chunk(self.MLP_d0(torch.cat([mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d1, scale_d1, prob_d1 = torch.chunk(self.MLP_d1(torch.cat([d0, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d2, scale_d2, prob_d2 = torch.chunk(self.MLP_d2(torch.cat([d0, d1, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d3, scale_d3, prob_d3 = torch.chunk(self.MLP_d3(torch.cat([d0, d1, d2, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_d4, scale_d4, prob_d4 = torch.chunk(self.MLP_d4(torch.cat([d0, d1, d2, d3, mean_scale], dim=-1)), chunks=3, dim=-1)
-        mean_adj = torch.cat([mean_d0, mean_d1, mean_d2, mean_d3, mean_d4], dim=-1)
-        scale_adj = torch.cat([scale_d0, scale_d1, scale_d2, scale_d3, scale_d4], dim=-1)
-        prob_adj = torch.cat([prob_d0, prob_d1, prob_d2, prob_d3, prob_d4], dim=-1)
+        o0 = torch.chunk(self.MLP_d0(torch.cat([mean_scale], dim=-1)), chunks=3*n_adj, dim=-1)
+        o1 = torch.chunk(self.MLP_d1(torch.cat([d0, mean_scale], dim=-1)), chunks=3*n_adj, dim=-1)
+        o2 = torch.chunk(self.MLP_d2(torch.cat([d0, d1, mean_scale], dim=-1)), chunks=3*n_adj, dim=-1)
+        o3 = torch.chunk(self.MLP_d3(torch.cat([d0, d1, d2, mean_scale], dim=-1)), chunks=3*n_adj, dim=-1)
+        o4 = torch.chunk(self.MLP_d4(torch.cat([d0, d1, d2, d3, mean_scale], dim=-1)), chunks=3*n_adj, dim=-1)
+        outs = [o0, o1, o2, o3, o4]
 
-        if to_dec == 0:
-            return mean_d0, scale_d0, prob_d0
-        if to_dec == 1:
-            return mean_d1, scale_d1, prob_d1
-        if to_dec == 2:
-            return mean_d2, scale_d2, prob_d2
-        if to_dec == 3:
-            return mean_d3, scale_d3, prob_d3
-        if to_dec == 4:
-            return mean_d4, scale_d4, prob_d4
-        return mean_adj, scale_adj, prob_adj
+        if to_dec in (0, 1, 2, 3, 4):
+            return outs[to_dec]  # (mean_adj[, mean_adj2], scale_adj[, scale_adj2], prob_adj[, prob_adj2])
+
+        # Concatenate each of the 3*n_adj output slots across all 5 groups.
+        return tuple(torch.cat([o[i] for o in outs], dim=-1) for i in range(3*n_adj))
 
 class Channel_CTX_fea_tiny(nn.Module):
     def __init__(self):
@@ -320,12 +419,15 @@ class CausalKNNContext(nn.Module):
             torch.tensor(math.log(temperature), dtype=torch.float32))
         # hash_feats を正規化してから correction を計算（学習安定化）
         self.norm = nn.LayerNorm(hash_dim)
-        # 残差補正: 2層 + LayerNorm + GELU で高い表現力を確保
+        # 残差補正: 3層 + LayerNorm + GELU で高い表現力を確保(2x幅、+1層)
         self.correction = nn.Sequential(
-            nn.Linear(hash_dim * 2, hash_dim * 4),
-            nn.LayerNorm(hash_dim * 4),
+            nn.Linear(hash_dim * 2, hash_dim * 8),
+            nn.LayerNorm(hash_dim * 8),
             GEGLUAct(),
-            nn.Linear(hash_dim * 2, hash_dim),
+            nn.Linear(hash_dim * 4, hash_dim * 8),
+            nn.LayerNorm(hash_dim * 8),
+            GEGLUAct(),
+            nn.Linear(hash_dim * 4, hash_dim),
         )
 
     def _get_temp(self) -> torch.Tensor:
@@ -439,20 +541,27 @@ class AnchorCondNorm(nn.Module):
         self.norm_scale = nn.LayerNorm(feat_dim, elementwise_affine=False)
         self.norm_offset = nn.LayerNorm(feat_dim, elementwise_affine=False)
         self.norm_feat = nn.LayerNorm(feat_dim, elementwise_affine=False)
+        # Widened (2x hidden) and deepened (+1 hidden layer), matching mlp_grid's capacity bump.
         self.scale_proj = nn.Sequential(
-            nn.Linear(scale_cond_dim, feat_dim * 2),
+            nn.Linear(scale_cond_dim, feat_dim * 4),
             GEGLUAct(),
-            nn.Linear(feat_dim, feat_dim * 2),
+            nn.Linear(feat_dim * 2, feat_dim * 4),
+            GEGLUAct(),
+            nn.Linear(feat_dim * 2, feat_dim * 2),
         )
         self.offset_proj = nn.Sequential(
-            nn.Linear(offset_cond_dim, feat_dim * 2),
+            nn.Linear(offset_cond_dim, feat_dim * 4),
             GEGLUAct(),
-            nn.Linear(feat_dim, feat_dim * 2),
+            nn.Linear(feat_dim * 2, feat_dim * 4),
+            GEGLUAct(),
+            nn.Linear(feat_dim * 2, feat_dim * 2),
         )
         self.feat_proj = nn.Sequential(
-            nn.Linear(anchor_feat_dim, feat_dim * 2),
+            nn.Linear(anchor_feat_dim, feat_dim * 4),
             GEGLUAct(),
-            nn.Linear(feat_dim, feat_dim * 2),
+            nn.Linear(feat_dim * 2, feat_dim * 4),
+            GEGLUAct(),
+            nn.Linear(feat_dim * 2, feat_dim * 2),
         )
 
     def forward(self, x: torch.Tensor,
@@ -515,6 +624,8 @@ class GaussianModel(nn.Module):
                  use_joint_context: bool=False,
                  use_anchor_cond_norm: bool=False,
                  use_causal_knn: bool=False,
+                 causal_knn_K: int=16,
+                 use_3gmm: bool=False,
                  use_reno: bool=False,
                  reno_ckpt_path: str=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                                    'submodules', 'reno', 'model', 'Ford', 'ckpt.pt'),
@@ -553,6 +664,7 @@ class GaussianModel(nn.Module):
         self.use_joint_context = use_joint_context
         self.use_anchor_cond_norm = use_anchor_cond_norm
         self.use_causal_knn = use_causal_knn
+        self.use_3gmm = use_3gmm
         self.use_reno = use_reno
         self.reno_ckpt_path = reno_ckpt_path
 
@@ -641,17 +753,23 @@ class GaussianModel(nn.Module):
             nn.Sigmoid()
         ).cuda()
 
+        # Entropy-prediction MLP: widened (2x hidden width) and deepened (+1 hidden layer)
+        # relative to the original 2-hidden-layer design, so it has more capacity to exploit
+        # the causal_knn / anchor_cond_norm context that feeds it.
         self.mlp_grid = nn.Sequential(
-            nn.Linear(self.encoding_xyz.output_dim, feat_dim*4),
+            nn.Linear(self.encoding_xyz.output_dim, feat_dim*8),
             GEGLUAct(),
-            nn.Linear(feat_dim*2, feat_dim*4),
+            nn.Linear(feat_dim*4, feat_dim*8),
             GEGLUAct(),
-            nn.Linear(feat_dim*2, (feat_dim+6+3*self.n_offsets)*2+feat_dim+1+1+1),
+            nn.Linear(feat_dim*4, feat_dim*8),
+            GEGLUAct(),
+            nn.Linear(feat_dim*4, (feat_dim+6+3*self.n_offsets)*2+feat_dim+1+1+1),
         ).cuda()
 
         if not is_synthetic_nerf:
-            self.mlp_deform = Channel_CTX_fea().cuda()
+            self.mlp_deform = Channel_CTX_fea(n_mix=3 if use_3gmm else 2).cuda()
         else:
+            assert not use_3gmm, 'use_3gmm is not implemented for Channel_CTX_fea_tiny (synthetic nerf scenes)'
             print('find synthetic nerf, use Channel_CTX_fea_tiny')
             self.mlp_deform = Channel_CTX_fea_tiny().cuda()
 
@@ -666,13 +784,14 @@ class GaussianModel(nn.Module):
         if use_causal_knn:
             self.causal_knn = CausalKNNContext(
                 hash_dim=self.encoding_xyz.output_dim,
-                K=16,
+                K=causal_knn_K,
                 temperature=1.0,
                 max_lookback=3000,
             ).cuda()
 
         self.entropy_gaussian = Entropy_gaussian(Q=1).cuda()
         self.EG_mix_prob_2 = Entropy_gaussian_mix_prob_2(Q=1).cuda()
+        self.EG_mix_prob_3 = Entropy_gaussian_mix_prob_3(Q=1).cuda()
 
     def get_encoding_params(self):
         params = []
@@ -690,10 +809,305 @@ class GaussianModel(nn.Module):
 
     def get_mlp_size(self, digit=32):
         mlp_size = 0
+        quant_bits = getattr(self, '_mlp_quant_bits', None)
+        is_fp16 = getattr(self, '_mlp_fp16', False)
         for n, p in self.named_parameters():
             if 'mlp' in n:
-                mlp_size += p.numel()*digit
+                # Only mlp_grid/mlp_deform (the entropy-prediction MLPs) are ever fake-quantized
+                # by quantize_mlps_()/quantize_mlps_fp16_(); everything else (mlp_opacity/cov/
+                # color) stays at the full `digit` (fp32) width.
+                if is_fp16 and ('mlp_grid' in n or 'mlp_deform' in n):
+                    # True IEEE half precision: no extra scale metadata needed, unlike the linear
+                    # int quantization below, so it's a flat 16 bits/param (weights and biases).
+                    mlp_size += p.numel()*16
+                elif quant_bits is not None and p.dim() >= 2 and ('mlp_grid' in n or 'mlp_deform' in n):
+                    mlp_size += p.numel()*quant_bits
+                    # Per-output-channel scale overhead (fp16 per row) -- quantize_mlps_ uses one
+                    # scale per out_feature row, not one per tensor, so this has to be counted too.
+                    mlp_size += p.shape[0]*16
+                else:
+                    mlp_size += p.numel()*digit
         return mlp_size, mlp_size / 8 / 1024 / 1024
+
+    def structured_prune_mlps_(self, ratio=0.3):
+        """Structurally prunes the least-important GEGLU hidden units out of mlp_grid and every
+        Channel_CTX_fea sub-MLP (mlp_deform's MLP_d0..d4), shrinking the actual weight matrices
+        (not just zeroing them) so get_mlp_size() reflects fewer parameters directly. Complements
+        quantize_mlps_ (fewer params x fewer bits each) -- call this first, then quantize the
+        now-smaller network. No fine-tuning after pruning: this is a one-shot post-training cut,
+        so expect some quality loss at high ratios.
+        """
+        total_before = 0
+        total_after = 0
+        b, a = _prune_sequential_geglu_(self.mlp_grid, ratio)
+        total_before += b; total_after += a
+        for name in ['MLP_d0', 'MLP_d1', 'MLP_d2', 'MLP_d3', 'MLP_d4']:
+            seq = getattr(self.mlp_deform, name, None)
+            if seq is not None:
+                b, a = _prune_sequential_geglu_(seq, ratio)
+                total_before += b; total_after += a
+        pct = 100 * (1 - total_after / total_before) if total_before > 0 else 0.0
+        print(f"[structured_prune_mlps_] ratio={ratio}: {total_before} -> {total_after} params ({pct:.1f}% reduction)")
+
+    def diagnose_feat_calibration(self):
+        """One-shot diagnostic: how well does feat's predicted mixture distribution match the
+        actual (already-quantized) feat values it has to encode? Mirrors estimate_final_bits()'s
+        feat pipeline exactly, then reports the calibration gap: actual residual spread vs the
+        model's own predicted spread, and the fraction of |z|>3 outliers against the dominant
+        mixture component vs the ~0.27% a well-calibrated Gaussian would produce. actual >>
+        predicted means the predicted scale is too narrow (arithmetic coding pays a
+        quadratic-in-residual penalty for this -- the likely cause of a post-pruning bit-cost
+        blowup); actual << predicted means it's too wide (bits being left on the table).
+        """
+        mask_anchor = self.get_mask_anchor.to(torch.bool)[:, 0]
+        _anchor = self.get_anchor[mask_anchor]
+        _feat = self._anchor_feat[mask_anchor]
+        _grid_offsets = self._offset[mask_anchor]
+        _scaling = self.get_scaling[mask_anchor]
+        _mask = self.get_mask[mask_anchor]
+
+        if self.use_causal_knn:
+            _anchor_int = torch.round(_anchor / self.voxel_size).long()
+            sorted_indices = calculate_morton_order(_anchor_int)
+            unsort_indices = torch.argsort(sorted_indices)
+            anchor_sorted = _anchor[sorted_indices]
+            hash_feats = self.calc_interp_feat(anchor_sorted)
+            causal_ctx = self.causal_knn.aggregate_only(hash_feats, anchor_sorted, chunk_size=MAX_batch_size)
+            feat_context_no_cond = self.causal_knn.apply_fusion(hash_feats, causal_ctx)[unsort_indices]
+        else:
+            feat_context_no_cond = self.calc_interp_feat(_anchor)
+
+        _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj_no_cond, Q_scaling_adj, Q_offsets_adj = \
+            torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+        Q_scaling = torch.clamp(0.001 * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
+        Q_offsets = torch.clamp(0.2 * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
+        grid_scaling = (STE_multistep.apply(_scaling, Q_scaling, self.get_scaling.mean())).detach()
+        offsets_full = (STE_multistep.apply(_grid_offsets, Q_offsets.unsqueeze(1), self._offset.mean())).detach()
+        offsets_full = offsets_full * _mask.repeat(1, 1, 3).to(offsets_full.dtype)
+
+        if self.use_causal_knn:
+            hash_feats_cond = self.calc_interp_feat(anchor_sorted, grid_scaling[sorted_indices], offsets_full[sorted_indices])
+            feat_context_with_scale_offset = self.causal_knn.apply_fusion(hash_feats_cond, causal_ctx)[unsort_indices]
+        else:
+            feat_context_with_scale_offset = self.calc_interp_feat(_anchor, grid_scaling, offsets_full)
+
+        mean, scale, prob, _, _, _, _, _, _, _ = \
+            torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+        Q_feat_adj = Q_feat_adj_no_cond
+        Q_feat = torch.clamp(1 * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
+        _feat = (STE_multistep.apply(_feat, Q_feat, self._anchor_feat.mean())).detach()
+
+        mean_list, scale_list, probs_list = self.get_feat_mixture(_feat, mean, scale, prob)
+
+        means = torch.stack(mean_list, dim=0)   # [K, N, D]
+        scales = torch.stack(scale_list, dim=0).clamp(min=1e-6)
+        probs = torch.stack(probs_list, dim=0)
+        probs = probs / probs.sum(dim=0, keepdim=True).clamp(min=1e-8)
+
+        weighted_mean = (probs * means).sum(dim=0)
+        weighted_scale = (probs * scales).sum(dim=0)
+        residual = _feat - weighted_mean
+        actual_std = residual.std().item()
+        pred_scale_mean = weighted_scale.mean().item()
+
+        dominant = torch.argmax(probs, dim=0)
+        dom_mean = torch.gather(means, 0, dominant.unsqueeze(0)).squeeze(0)
+        dom_scale = torch.gather(scales, 0, dominant.unsqueeze(0)).squeeze(0).clamp(min=1e-6)
+        z = (_feat - dom_mean) / dom_scale
+        outlier_frac = (z.abs() > 3).float().mean().item()
+        expected_outlier_frac = 2 * (1 - 0.5 * (1 + math.erf(3 / math.sqrt(2))))
+
+        print(f"[diagnose_feat_calibration] N={_feat.shape[0]} D={_feat.shape[1]} n_mix={probs.shape[0]}")
+        print(f"[diagnose_feat_calibration] actual residual std={actual_std:.4f} vs predicted avg scale={pred_scale_mean:.4f} "
+              f"(ratio={actual_std/max(pred_scale_mean,1e-8):.3f}; >1 => predicted scale too narrow, <1 => too wide)")
+        print(f"[diagnose_feat_calibration] dominant-component z: mean={z.mean().item():.4f} std={z.std().item():.4f} "
+              f"|z|>3 frac: actual={outlier_frac*100:.3f}% vs well-calibrated~{expected_outlier_frac*100:.3f}%")
+
+    def finetune_pruned_mlps_(self, iters=300, lr=1e-4, chunk_size=50_000, lambda_q_reg=1000.0):
+        """Brief post-prune recovery: re-fits mlp_grid/mlp_deform's entropy predictions (mean,
+        scale, mixture prob, Q) to the already-fixed anchor/feat/scaling/offset values by
+        directly minimizing the same rate loss estimate_final_bits() reports. Only mlp_grid and
+        mlp_deform receive gradients -- geometry/appearance and every other network stay frozen.
+        structured_prune_mlps_'s magnitude heuristic has no gradient signal, so without this a
+        pruned entropy head can leave the real arithmetic encoder/decoder round-trip badly
+        miscalibrated for outlier anchors (see diagnose_feat_calibration).
+
+        Processes anchors in `chunk_size` pieces with gradient accumulation (chunk_loss.backward()
+        called per chunk, one optimizer.step() per full pass) -- at full scene scale (300k+
+        anchors) holding the whole set's activations for backward at once OOMs even though the
+        parameter count being trained is tiny; chunking bounds peak memory to one chunk while
+        still computing the exact full-batch gradient (sum of per-chunk gradients). calc_interp_feat
+        and causal_knn.apply_fusion are pure per-anchor operations (no cross-anchor mixing), so
+        chunking in original anchor order is exact -- only the causal aggregation into causal_ctx
+        needs the full sorted set, and that's precomputed once, unsorted back to original order,
+        before chunking begins.
+
+        Q_scaling/Q_offsets/Q_feat (the quantization step sizes) come out of the SAME mlp_grid
+        heads as mean/scale/prob, but unlike those, they directly set how coarsely _scaling/
+        _offset/_feat get quantized via STE -- i.e. they control reconstruction fidelity, not just
+        bit cost. A rate-only loss has zero incentive to keep them where they were and every
+        incentive to push them larger (coarser = fewer bits), which taxes PSNR for a rate-side
+        fix. lambda_q_reg penalizes squared relative drift of each Q away from its immediately
+        post-prune (pre-finetune) value, letting mean/scale/prob (pure entropy-modeling, no
+        reconstruction impact) keep improving while holding quantization granularity roughly
+        fixed.
+        """
+        Q_feat_init, Q_scaling_init, Q_offsets_init = 1, 0.001, 0.2
+
+        params = list(self.mlp_grid.parameters()) + list(self.mlp_deform.parameters())
+        optimizer = torch.optim.Adam(params, lr=lr)
+        EG = self.EG_mix_prob_3 if self.use_3gmm else self.EG_mix_prob_2
+
+        with torch.no_grad():
+            mask_anchor = self.get_mask_anchor.to(torch.bool)[:, 0]
+            _anchor = self.get_anchor[mask_anchor].detach()
+            _feat_raw = self._anchor_feat[mask_anchor].detach()
+            _grid_offsets_raw = self._offset[mask_anchor].detach()
+            _scaling_raw = self.get_scaling[mask_anchor].detach()
+            _mask = self.get_mask[mask_anchor].detach()
+            feat_mean_ref = self._anchor_feat.mean().detach()
+            scaling_mean_ref = self.get_scaling.mean().detach()
+            offset_mean_ref = self._offset.mean().detach()
+
+            if self.use_causal_knn:
+                _anchor_int = torch.round(_anchor / self.voxel_size).long()
+                sorted_indices = calculate_morton_order(_anchor_int)
+                unsort_indices = torch.argsort(sorted_indices)
+                anchor_sorted = _anchor[sorted_indices]
+                hash_feats = self.calc_interp_feat(anchor_sorted).detach()
+                causal_ctx_sorted = self.causal_knn.aggregate_only(hash_feats, anchor_sorted, chunk_size=MAX_batch_size).detach()
+                # Constant across iterations: hash_feats/causal_ctx/causal_knn.correction are
+                # all fixed (only mlp_grid/mlp_deform are being trained here). Unsorted back to
+                # original anchor order once here so the per-iteration loop can chunk in that
+                # order directly (apply_fusion/calc_interp_feat are pure per-anchor ops, so this
+                # is exact -- no re-sorting needed per chunk).
+                feat_context_no_cond = self.causal_knn.apply_fusion(hash_feats, causal_ctx_sorted)[unsort_indices].detach()
+                causal_ctx = causal_ctx_sorted[unsort_indices].detach()
+            else:
+                feat_context_no_cond = self.calc_interp_feat(_anchor).detach()
+
+        N = _anchor.shape[0]
+        chunk_size = min(chunk_size, N)
+        n_chunks = (N + chunk_size - 1) // chunk_size
+
+        with torch.no_grad():
+            # Reference Q's, frozen at their just-pruned (pre-finetune) values. All three come
+            # out of the same "no_cond" pass (Q_feat_adj is deliberately sourced from this stage
+            # everywhere in the codebase, never the FiLM-conditioned one), so one chunked forward
+            # pass here is enough for all of them.
+            Q_scaling_ref_list, Q_offsets_ref_list, Q_feat_ref_list = [], [], []
+            for c in range(n_chunks):
+                s, e = c * chunk_size, min((c + 1) * chunk_size, N)
+                _, _, _, _, _, _, _, Q_feat_adj_ref, Q_scaling_adj_ref, Q_offsets_adj_ref = \
+                    torch.split(self.get_grid_mlp(feat_context_no_cond[s:e]), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+                Q_scaling_ref_list.append(torch.clamp(Q_scaling_init * (1 + torch.tanh(Q_scaling_adj_ref)), min=0.00001))
+                Q_offsets_ref_list.append(torch.clamp(Q_offsets_init * (1 + torch.tanh(Q_offsets_adj_ref)), min=0.0001))
+                Q_feat_ref_list.append(torch.clamp(Q_feat_init * (1 + torch.tanh(Q_feat_adj_ref)), min=0.0001))
+            Q_scaling_ref = torch.cat(Q_scaling_ref_list, dim=0).detach()
+            Q_offsets_ref = torch.cat(Q_offsets_ref_list, dim=0).detach()
+            Q_feat_ref = torch.cat(Q_feat_ref_list, dim=0).detach()
+
+        for it in range(iters):
+          total_loss_val = 0.0
+          with torch.enable_grad():
+            # training_report() (this method's only caller) runs inside an outer
+            # torch.no_grad() block, so the forward/backward pass here needs an explicit
+            # enable_grad() to get a real graph -- otherwise loss.backward() has nothing to
+            # walk ("does not require grad and does not have a grad_fn").
+            optimizer.zero_grad()
+
+            for c in range(n_chunks):
+                s, e = c * chunk_size, min((c + 1) * chunk_size, N)
+
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj_no_cond, Q_scaling_adj, Q_offsets_adj = \
+                    torch.split(self.get_grid_mlp(feat_context_no_cond[s:e]), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+                Q_scaling = torch.clamp(Q_scaling_init * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
+                Q_offsets = torch.clamp(Q_offsets_init * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
+
+                grid_scaling = (STE_multistep.apply(_scaling_raw[s:e], Q_scaling, scaling_mean_ref)).detach()
+                offsets_full = (STE_multistep.apply(_grid_offsets_raw[s:e], Q_offsets.unsqueeze(1), offset_mean_ref)).detach()
+                offsets_full = offsets_full * _mask[s:e].repeat(1, 1, 3).to(offsets_full.dtype)
+
+                if self.use_causal_knn:
+                    hash_feats_cond = self.calc_interp_feat(_anchor[s:e], grid_scaling, offsets_full)
+                    feat_context_with_scale_offset = self.causal_knn.apply_fusion(hash_feats_cond, causal_ctx[s:e])
+                else:
+                    feat_context_with_scale_offset = self.calc_interp_feat(_anchor[s:e], grid_scaling, offsets_full)
+
+                mean, scale, prob, _, _, _, _, _, _, _ = \
+                    torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+                Q_feat_adj = Q_feat_adj_no_cond
+                Q_feat = torch.clamp(Q_feat_init * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
+                _feat = (STE_multistep.apply(_feat_raw[s:e], Q_feat, feat_mean_ref)).detach()
+
+                mean_list, scale_list, probs_list = self.get_feat_mixture(_feat, mean, scale, prob)
+                offsets = offsets_full.view(-1, 3*self.n_offsets)
+                mask_tmp = _mask[s:e].repeat(1, 1, 3).view(-1, 3*self.n_offsets)
+
+                bit_feat = EG.forward(_feat, *mean_list, *scale_list, *probs_list, Q=Q_feat)
+                bit_scaling = self.entropy_gaussian.forward(grid_scaling, mean_scaling, scale_scaling, Q_scaling)
+                bit_offsets = self.entropy_gaussian.forward(offsets, mean_offsets, scale_offsets, Q_offsets)
+                bit_offsets = bit_offsets * mask_tmp
+
+                rate_loss = bit_feat.sum() + bit_scaling.sum() + bit_offsets.sum()
+                q_reg = (((Q_scaling - Q_scaling_ref[s:e]) / Q_scaling_ref[s:e]) ** 2).sum() \
+                      + (((Q_offsets - Q_offsets_ref[s:e]) / Q_offsets_ref[s:e]) ** 2).sum() \
+                      + (((Q_feat - Q_feat_ref[s:e]) / Q_feat_ref[s:e]) ** 2).sum()
+                chunk_loss = rate_loss + lambda_q_reg * q_reg
+                chunk_loss.backward()
+                total_loss_val += chunk_loss.item()
+
+            torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
+            optimizer.step()
+
+          if it == 0 or it == iters - 1 or (it + 1) % max(1, iters // 5) == 0:
+                print(f"[finetune_pruned_mlps_] iter {it+1}/{iters} rate_loss(bits)={total_loss_val:.1f}")
+
+    def quantize_mlps_(self, bits=8):
+        """Post-training fake-quantizes (quantize then dequantize in place) mlp_grid's and
+        mlp_deform's weight matrices to `bits` via per-output-channel (per-row) symmetric linear
+        quantization. Biases/LayerNorms (1-D params) are left at full precision (negligible
+        parameter count). Mutates self in place; get_mlp_size() reflects the smaller size
+        afterward via self._mlp_quant_bits.
+
+        Per-*row* (not per-tensor) scale matters specifically for mlp_grid's final layer: it
+        packs mean/scale/prob (50 rows each) together with mean_scaling/scale_scaling (only 6
+        rows each) and offsets/Q-adjustments in the *same* weight matrix. A single global scale
+        is set by whichever output channel has the largest weights -- empirically feat's rows do
+        -- which then coarsens every other channel's precision far more than its own dynamic
+        range warrants (scaling's real size grew ~20% under per-tensor quantization even though
+        feat/MLPs improved). Per-row scales give every output channel its own precision budget
+        instead.
+        """
+        self._mlp_quant_bits = bits
+        qmax = 2 ** (bits - 1) - 1
+        n_tensors = 0
+        with torch.no_grad():
+            for m in [self.mlp_grid, self.mlp_deform]:
+                for name, p in m.named_parameters():
+                    if p.dim() >= 2:
+                        # p: [out_features, in_features] for nn.Linear -- one scale per out row.
+                        scale = p.abs().amax(dim=1, keepdim=True) / qmax
+                        safe_scale = torch.where(scale > 0, scale, torch.ones_like(scale))
+                        q = torch.clamp(torch.round(p / safe_scale), -qmax, qmax)
+                        p.copy_(torch.where(scale > 0, q * safe_scale, p))
+                        n_tensors += 1
+        print(f"[quantize_mlps_] fake-quantized {n_tensors} weight matrices in mlp_grid/mlp_deform to {bits} bits (per-output-channel scale)")
+
+    def quantize_mlps_fp16_(self):
+        """Post-training round-trips mlp_grid's and mlp_deform's parameters (weights and biases)
+        through true IEEE half precision (torch.float16) in place, simulating real fp16 storage.
+        Unlike quantize_mlps_ (linear int quantization needing a per-row scale), fp16 needs no
+        extra metadata -- get_mlp_size() charges a flat 16 bits/param via self._mlp_fp16.
+        """
+        self._mlp_fp16 = True
+        n_tensors = 0
+        with torch.no_grad():
+            for m in [self.mlp_grid, self.mlp_deform]:
+                for name, p in m.named_parameters():
+                    p.copy_(p.half().float())
+                    n_tensors += 1
+        print(f"[quantize_mlps_fp16_] round-tripped {n_tensors} tensors in mlp_grid/mlp_deform through fp16")
 
     def eval(self):
         self.mlp_opacity.eval()
@@ -833,6 +1247,38 @@ class GaussianModel(nn.Module):
              1, 1, 1],
             dim=-1,
         )
+
+    def get_feat_mixture(self, feat_for_ar_ctx, mean, scale, prob, mean_scale_ctx=None, to_dec=-1):
+        """Builds the per-component (mean, scale, prob) lists for feat's entropy mixture,
+        uniformly handling the 2-component (default) and 3-component (use_3gmm) cases.
+
+        feat_for_ar_ctx: the feat values fed as the autoregressive context to mlp_deform
+        (quantized ground truth when encoding, the running decoded buffer when decoding).
+        mean/scale/prob: mlp_grid's own base-component prediction for the segment of feat
+        actually being entropy-coded this call (the full feat_dim width when to_dec=-1, or just
+        the 10-dim slice for group `to_dec` in the chunked per-group encode/decode loops).
+        mean_scale_ctx: the *full* (unsliced) cat([mean, scale, prob]) conditioning input
+        get_deform_mlp expects regardless of to_dec -- pass this explicitly when mean/scale/prob
+        above are already sliced to one group; defaults to cat([mean, scale, prob]) when not
+        (i.e. when to_dec=-1 and mean/scale/prob are the full-width tensors already).
+
+        Returns (mean_list, scale_list, probs_list) -- pass unpacked (*mean_list, *scale_list,
+        *probs_list) into EG_mix_prob_2/3.forward, or as plain lists into
+        encoder_gaussian_mixed_chunk / decoder_gaussian_mixed_chunk (already list-generic).
+        """
+        if mean_scale_ctx is None:
+            mean_scale_ctx = torch.cat([mean, scale, prob], dim=-1)
+        if self.use_3gmm:
+            mean_adj, scale_adj, prob_adj, mean_adj2, scale_adj2, prob_adj2 = \
+                self.get_deform_mlp.forward(feat_for_ar_ctx, mean_scale_ctx, to_dec=to_dec)
+            probs = torch.softmax(torch.stack([prob, prob_adj, prob_adj2], dim=-1), dim=-1)
+            return [mean, mean_adj, mean_adj2], [scale, scale_adj, scale_adj2], \
+                   [probs[..., 0], probs[..., 1], probs[..., 2]]
+        else:
+            mean_adj, scale_adj, prob_adj = \
+                self.get_deform_mlp.forward(feat_for_ar_ctx, mean_scale_ctx, to_dec=to_dec)
+            probs = torch.softmax(torch.stack([prob, prob_adj], dim=-1), dim=-1)
+            return [mean, mean_adj], [scale, scale_adj], [probs[..., 0], probs[..., 1]]
 
     def calc_interp_feat(self, x, anchor_scale=None, anchor_offset=None, anchor_feat=None):
         # x: [N, 3]
@@ -1050,6 +1496,15 @@ class GaussianModel(nn.Module):
                 lr = self.encoding_xyz_scheduler_args(iteration)
                 param_group['lr'] = lr
             if param_group["name"] == "mlp_grid":
+                lr = self.mlp_grid_scheduler_args(iteration)
+                param_group['lr'] = lr
+            if self.use_anchor_cond_norm and param_group["name"] == "anchor_cond_norm":
+                # Shares mlp_grid's schedule since it was initialized with mlp_grid_lr_init and
+                # never had its own decay branch -- previously harmless because this module was
+                # dead code whenever use_causal_knn=True (see calc_interp_feat call sites), but
+                # now that it actually participates in the forward pass its LR must anneal too,
+                # or it keeps making large updates for the entire run while everything else has
+                # converged, which can destabilize the feat entropy model late in training.
                 lr = self.mlp_grid_scheduler_args(iteration)
                 param_group['lr'] = lr
             if param_group["name"] == "mlp_deform":
@@ -1427,7 +1882,12 @@ class GaussianModel(nn.Module):
         if self.use_feat_bank:
             self.mlp_feature_bank.load_state_dict(checkpoint['mlp_feature_bank'])
         self.encoding_xyz.load_state_dict(checkpoint['encoding_xyz'])
+        # Rebuild any Linear whose shape was shrunk by structured_prune_mlps_() before this
+        # checkpoint was saved -- mlp_grid/mlp_deform are otherwise always constructed at their
+        # full (unpruned) size in __init__, so load_state_dict would fail on a size mismatch.
+        _resize_module_to_state_dict_(self.mlp_grid, checkpoint['grid_mlp'])
         self.mlp_grid.load_state_dict(checkpoint['grid_mlp'])
+        _resize_module_to_state_dict_(self.mlp_deform, checkpoint['deform_mlp'])
         self.mlp_deform.load_state_dict(checkpoint['deform_mlp'])
         if self.use_causal_knn and 'causal_knn' in checkpoint:
             self.causal_knn.load_state_dict(checkpoint['causal_knn'])
@@ -1479,17 +1939,30 @@ class GaussianModel(nn.Module):
         sorted_indices = calculate_morton_order(_anchor_int)
         unsort_indices = torch.argsort(sorted_indices)
         anchor_sorted = _anchor[sorted_indices]
+        # Pruned (masked-off) offset slots are never trained against any rendering loss, so their
+        # raw value is unconstrained garbage; zero them out before using them as FiLM conditioning
+        # input, matching what conduct_encoding()/estimate_final_bits() condition on.
+        _grid_offsets_masked = _grid_offsets * _mask.repeat(1, 1, 3).to(_grid_offsets.dtype)
+
         if self.use_causal_knn:
-            # codec と一致させるため anchor_feat を使わない
+            # Two-stage, matching the non-causal_knn branch: reuse the same (expensive) neighbor
+            # aggregation for both stages, only re-running the cheap calc_interp_feat + apply_fusion
+            # so stage 2 can condition on scaling/offset via FiLM (AnchorCondNorm).
             hash_feats = self.calc_interp_feat(anchor_sorted)
-            feat_context = self.causal_knn(hash_feats, anchor_sorted, chunk_size=MAX_batch_size)
-            feat_context = feat_context[unsort_indices]
+            causal_ctx = self.causal_knn.aggregate_only(hash_feats, anchor_sorted, chunk_size=MAX_batch_size)
+            feat_context_no_cond = self.causal_knn.apply_fusion(hash_feats, causal_ctx)[unsort_indices]
+            hash_feats_cond = self.calc_interp_feat(
+                anchor_sorted,
+                _scaling[sorted_indices],
+                _grid_offsets_masked[sorted_indices],
+            )
+            feat_context_with_scale_offset = self.causal_knn.apply_fusion(hash_feats_cond, causal_ctx)[unsort_indices]
         else:
             feat_context_no_cond = self.calc_interp_feat(anchor_sorted)[unsort_indices]
             feat_context_with_scale_offset = self.calc_interp_feat(
                 anchor_sorted,
                 _scaling[sorted_indices],
-                _grid_offsets[sorted_indices],
+                _grid_offsets_masked[sorted_indices],
             )[unsort_indices]
 
         # MLP + entropy を chunk で処理して OOM を回避
@@ -1513,15 +1986,14 @@ class GaussianModel(nn.Module):
             offsets_c  = _grid_offsets[s:e]
             mask_c     = _mask[s:e]
 
-            if self.use_causal_knn:
-                ctx_c = feat_context[s:e]
-                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                    self.forward_grid(ctx_c)
-            else:
-                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
-                    self.forward_grid(feat_context_no_cond[s:e])
-                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
-                    self.forward_grid(feat_context_with_scale_offset[s:e])
+            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj_no_cond, Q_scaling_adj, Q_offsets_adj = \
+                self.forward_grid(feat_context_no_cond[s:e])
+            mean, scale, prob, _, _, _, _, _, _, _ = \
+                self.forward_grid(feat_context_with_scale_offset[s:e])
+            # See gaussian_renderer/__init__.py for why: Q_feat_adj always comes from the
+            # unconditioned context, never the FiLM-conditioned one (causal_knn and non-causal_knn
+            # both shown to destabilize when it's sourced from the conditioned pass).
+            Q_feat_adj = Q_feat_adj_no_cond
 
             Q_feat_adj    = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
             Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
@@ -1531,22 +2003,19 @@ class GaussianModel(nn.Module):
             Qo = torch.clamp(_Q_offsets_base * (1 + torch.tanh(Q_offsets_adj)), min=1e-4)
 
             feat_q = (STE_multistep.apply(feat_c, Qf)).detach()
-            mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_q, torch.cat([mean, scale, prob], dim=-1))
-            probs = torch.softmax(torch.stack([prob, prob_adj], dim=-1), dim=-1)
+            mean_list, scale_list, probs_list = self.get_feat_mixture(feat_q, mean, scale, prob)
 
             mean_s  = mean_scaling.contiguous().view(-1)
-            scale_s = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
+            scale_s = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-3)
             mean_o  = mean_offsets.contiguous().view(-1)
-            scale_o = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-            scale   = torch.clamp(scale, min=1e-9)
+            scale_o = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-3)
 
             gs = (STE_multistep.apply(scaling_c.view(-1), Qs)).detach()
             go = (STE_multistep.apply(offsets_c.view(-1, 3 * self.n_offsets).view(-1), Qo)).detach()
             mask_tmp = mask_c.repeat(1, 1, 3).view(-1, 3 * self.n_offsets).view(-1)
 
-            bf = self.EG_mix_prob_2.forward(
-                feat_q, mean, mean_adj, scale, scale_adj,
-                probs[..., 0], probs[..., 1], Q=Qf)
+            EG = self.EG_mix_prob_3 if self.use_3gmm else self.EG_mix_prob_2
+            bf = EG.forward(feat_q, *mean_list, *scale_list, *probs_list, Q=Qf)
             bs = self.entropy_gaussian.forward(gs, mean_s, scale_s, Qs)
             bo = self.entropy_gaussian.forward(go, mean_o, scale_o, Qo)
             bo = bo * mask_tmp
@@ -1574,47 +2043,86 @@ class GaussianModel(nn.Module):
         hash_embeddings = self.get_encoding_params()
 
         if self.use_causal_knn:
+            # Two-stage (see compute_total_bits): reuse the same neighbor aggregation for both
+            # stages so stage 2 can condition feat's context on scaling/offset via FiLM.
             _anchor_int = torch.round(_anchor / self.voxel_size).long()
             sorted_indices = calculate_morton_order(_anchor_int)
             unsort_indices = torch.argsort(sorted_indices)
             anchor_sorted = _anchor[sorted_indices]
             hash_feats = self.calc_interp_feat(anchor_sorted)
-            feat_context = self.causal_knn(hash_feats, anchor_sorted, chunk_size=MAX_batch_size)[unsort_indices]
+            causal_ctx = self.causal_knn.aggregate_only(hash_feats, anchor_sorted, chunk_size=MAX_batch_size)
+            feat_context_no_cond = self.causal_knn.apply_fusion(hash_feats, causal_ctx)[unsort_indices]
         else:
             feat_context_no_cond = self.calc_interp_feat(_anchor)
-            feat_context_with_scale_offset = self.calc_interp_feat(_anchor, _scaling, _grid_offsets)
-        if self.use_causal_knn:
-            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                torch.split(self.get_grid_mlp(feat_context), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
-        else:
-            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
-                torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
-            mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
-                torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
-        Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
-        Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-        Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
-        _feat = (STE_multistep.apply(_feat, Q_feat)).detach()
-        mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(_feat, torch.cat([mean, scale, prob], dim=-1))
-        probs = torch.stack([prob, prob_adj], dim=-1)
-        probs = torch.softmax(probs, dim=-1)
 
-        grid_scaling = (STE_multistep.apply(_scaling, Q_scaling)).detach()
-        offsets = (STE_multistep.apply(_grid_offsets, Q_offsets.unsqueeze(1))).detach()
-        offsets = offsets.view(-1, 3*self.n_offsets)
+        # Stage 1: scaling/offset entropy params from the unconditioned context.
+        _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj_no_cond, Q_scaling_adj, Q_offsets_adj = \
+            torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+        # Same floors conduct_encoding() clamps to -- match exactly so the two paths quantize
+        # scaling/offset identically.
+        Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
+        Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
+
+        # Quantize scaling/offset *before* building stage 2's context, so stage 2 conditions on
+        # the same actually-quantized values conduct_encoding() will condition on (and transmit),
+        # not on the raw continuous parameters -- otherwise this estimate and the real encoded
+        # size diverge whenever AnchorCondNorm's FiLM conditioning is actually live.
+        grid_scaling = (STE_multistep.apply(_scaling, Q_scaling, self.get_scaling.mean())).detach()
+        offsets_full = (STE_multistep.apply(_grid_offsets, Q_offsets.unsqueeze(1), self._offset.mean())).detach()
+        # Zero out pruned (masked-off) offset slots, matching conduct_encoding()'s
+        # `offsets[~mask] = 0.0` -- these slots are never trained against any rendering loss, so
+        # their raw parameter value is unconstrained garbage; conditioning on it (instead of the 0
+        # the decoder will actually see) inflates offsets_full's variance and throws off feat's
+        # FiLM context, which is what caused the real estimate/encode gap.
+        offsets_full = offsets_full * _mask.repeat(1, 1, 3).to(offsets_full.dtype)
+
+        if self.use_causal_knn:
+            hash_feats_cond = self.calc_interp_feat(anchor_sorted, grid_scaling[sorted_indices], offsets_full[sorted_indices])
+            feat_context_with_scale_offset = self.causal_knn.apply_fusion(hash_feats_cond, causal_ctx)[unsort_indices]
+            print(f"[DEBUG2 estimate_final_bits] hash_feats: {hash_feats.mean().item():.4f}/{hash_feats.std().item():.4f} "
+                  f"causal_ctx: {causal_ctx.mean().item():.4f}/{causal_ctx.std().item():.4f} "
+                  f"grid_scaling: {grid_scaling.mean().item():.4f}/{grid_scaling.std().item():.4f} "
+                  f"offsets_full: {offsets_full.mean().item():.4f}/{offsets_full.std().item():.4f} "
+                  f"hash_feats_cond: {hash_feats_cond.mean().item():.4f}/{hash_feats_cond.std().item():.4f} "
+                  f"feat_ctx_wso: {feat_context_with_scale_offset.mean().item():.4f}/{feat_context_with_scale_offset.std().item():.4f} "
+                  f"N_anchor={anchor_sorted.shape[0]}")
+        else:
+            feat_context_with_scale_offset = self.calc_interp_feat(_anchor, grid_scaling, offsets_full)
+
+        mean, scale, prob, _, _, _, _, _, _, _ = \
+            torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3*self.n_offsets, 3*self.n_offsets, 1, 1, 1], dim=-1)
+        # See gaussian_renderer/__init__.py: Q_feat_adj always comes from the unconditioned
+        # context, never the FiLM-conditioned one.
+        Q_feat_adj = Q_feat_adj_no_cond
+        Q_feat = torch.clamp(Q_feat * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
+        _feat = (STE_multistep.apply(_feat, Q_feat, self._anchor_feat.mean())).detach()
+        print(f"[DEBUG estimate_final_bits] mean: {mean.mean().item():.4f}/{mean.std().item():.4f} "
+              f"scale: {scale.mean().item():.4f}/{scale.std().item():.4f} "
+              f"prob: {prob.mean().item():.4f}/{prob.std().item():.4f} "
+              f"Q_feat: {Q_feat.mean().item():.6f}/{Q_feat.std().item():.6f} min={Q_feat.min().item():.6f} max={Q_feat.max().item():.6f} "
+              f"feat: {_feat.mean().item():.4f}/{_feat.std().item():.4f} N={_feat.shape[0]}")
+        mean_list, scale_list, probs_list = self.get_feat_mixture(_feat, mean, scale, prob)
+
+        offsets = offsets_full.view(-1, 3*self.n_offsets)
         mask_tmp = _mask.repeat(1, 1, 3).view(-1, 3*self.n_offsets)
 
-        bit_feat = self.EG_mix_prob_2.forward(_feat,
-                                            mean, mean_adj,
-                                            scale, scale_adj,
-                                            probs[..., 0], probs[..., 1],
-                                            Q=Q_feat)
+        EG = self.EG_mix_prob_3 if self.use_3gmm else self.EG_mix_prob_2
+        bit_feat = EG.forward(_feat, *mean_list, *scale_list, *probs_list, Q=Q_feat)
 
         bit_scaling = self.entropy_gaussian.forward(grid_scaling, mean_scaling, scale_scaling, Q_scaling)
         bit_offsets = self.entropy_gaussian.forward(offsets, mean_offsets, scale_offsets, Q_offsets)
         bit_offsets = bit_offsets * mask_tmp
 
-        bit_anchor = _anchor.shape[0]*3*anchor_round_digits
+        if self.use_reno:
+            # Real RENO-compressed byte count for the exact anchor set conduct_encoding()
+            # will compress, instead of the pre-RENO fixed-bit-per-coordinate placeholder
+            # (anchor_round_digits) which has nothing to do with RENO's actual entropy coding
+            # and overstates its cost by ~4x.
+            from utils.reno_utils import compress_reno
+            _anchor_int_est = torch.round(_anchor / self.voxel_size)
+            bit_anchor = len(compress_reno(_anchor_int_est, ckpt_path=self.reno_ckpt_path)) * 8
+        else:
+            bit_anchor = _anchor.shape[0]*3*anchor_round_digits
         bit_feat = torch.sum(bit_feat).item()
         bit_scaling = torch.sum(bit_scaling).item()
         bit_offsets = torch.sum(bit_offsets).item()
@@ -1687,15 +2195,26 @@ class GaussianModel(nn.Module):
         torch.save(self.x_bound_min, os.path.join(pre_path_name, 'x_bound_min.pkl'))
         torch.save(self.x_bound_max, os.path.join(pre_path_name, 'x_bound_max.pkl'))
 
-        # Pre-compute causal KNN context for all anchors (already sorted in Morton order)
+        # Pre-compute causal KNN context for all anchors (already sorted in Morton order).
+        # The expensive O(N*K) neighbor search (aggregate_only) is shared between the two encoding
+        # stages below; only the cheap per-anchor calc_interp_feat + apply_fusion is redone per
+        # chunk for stage 2 so feat's context can condition on the just-encoded scaling/offset via
+        # FiLM (AnchorCondNorm) -- mirroring the non-causal_knn branch's two-stage design.
         if self.use_causal_knn:
-            all_feat_context = self.causal_knn(self.calc_interp_feat(_anchor), _anchor, chunk_size=MAX_batch_size)
+            _hash_feats_all = self.calc_interp_feat(_anchor)
+            causal_ctx_all = self.causal_knn.aggregate_only(_hash_feats_all, _anchor, chunk_size=MAX_batch_size)
+            all_feat_context_no_cond = self.causal_knn.apply_fusion(_hash_feats_all, causal_ctx_all)
+            print(f"[DEBUG2 conduct_encoding] hash_feats: {_hash_feats_all.mean().item():.4f}/{_hash_feats_all.std().item():.4f} "
+                  f"causal_ctx: {causal_ctx_all.mean().item():.4f}/{causal_ctx_all.std().item():.4f} "
+                  f"N_anchor={_anchor.shape[0]}")
 
         steps = (N // MAX_batch_size) if (N % MAX_batch_size) == 0 else (N // MAX_batch_size + 1)
 
         bit_feat_list = []
         bit_scaling_list = []
         bit_offsets_list = []
+        _dbg_mean, _dbg_scale, _dbg_prob, _dbg_qfeat, _dbg_feat = [], [], [], [], []
+        _dbg_scaling_cond, _dbg_offsets_cond, _dbg_hfc, _dbg_fctx = [], [], [], []
 
         hash_b_name = os.path.join(pre_path_name, 'hash.b')
         masks_b_name = os.path.join(pre_path_name, 'masks.b')
@@ -1716,19 +2235,22 @@ class GaussianModel(nn.Module):
             N_num = N_end - N_start
 
             if self.use_causal_knn:
-                # Single-stage: all parameters use pre-computed causal context
-                feat_context = all_feat_context[N_start:N_end]
-                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                    self.forward_grid(feat_context)
+                # Two-stage (see precompute comment above): stage 1 = scaling/offsets from the
+                # unconditioned context; stage 2 = feat conditioned on the just-quantized
+                # scaling/offset via FiLM (AnchorCondNorm), reusing causal_ctx_all so no extra
+                # neighbor search is needed.
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                    self.forward_grid(all_feat_context_no_cond[N_start:N_end])
+                # Q_feat_adj deliberately comes from this unconditioned stage-1 pass, not the
+                # FiLM-conditioned stage-2 pass below -- see gaussian_renderer/__init__.py for why.
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, self.feat_dim)
 
-                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
                 Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
                 Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
                 mean_scaling = mean_scaling.contiguous().view(-1)
                 mean_offsets = mean_offsets.contiguous().view(-1)
-                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-                Q_feat = torch.clamp(Q_feat * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-3)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-3)
                 Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
                 Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
 
@@ -1752,25 +2274,45 @@ class GaussianModel(nn.Module):
                 bit_offsets_list.append(bit_offsets)
                 t_offset += get_time() - t_offset_0
 
+                scaling_for_cond = scaling.view(N_num, 6).detach()
+                offsets_for_cond = offsets.view(N_num, self.n_offsets, 3).detach()
+
+                hash_feats_cond = self.calc_interp_feat(anchor_slice, anchor_scale=scaling_for_cond, anchor_offset=offsets_for_cond)
+                feat_context = self.causal_knn.apply_fusion(hash_feats_cond, causal_ctx_all[N_start:N_end])
+                mean, scale, prob, _, _, _, _, _, _, _ = \
+                    self.forward_grid(feat_context)
+                Q_feat = torch.clamp(Q_feat * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
+
+                _dbg_scaling_cond.append(scaling_for_cond.detach().reshape(-1))
+                _dbg_offsets_cond.append(offsets_for_cond.detach().reshape(-1))
+                _dbg_hfc.append(hash_feats_cond.detach().reshape(-1))
+                _dbg_fctx.append(feat_context.detach().reshape(-1))
+
                 feat = _feat[N_start:N_end]
                 feat = STE_multistep.apply(feat, Q_feat, self._anchor_feat.mean())
                 torch.cuda.synchronize(); t0 = time.time()
 
+                _dbg_mean.append(mean.detach().reshape(-1))
+                _dbg_scale.append(scale.detach().reshape(-1))
+                _dbg_prob.append(prob.detach().reshape(-1))
+                _dbg_qfeat.append(Q_feat.detach().reshape(-1))
+                _dbg_feat.append(feat.detach().reshape(-1))
+
                 t_feature_0 = get_time()
-                mean_scale = torch.cat([mean, scale, prob], dim=-1)
-                scale = torch.clamp(scale, min=1e-9)
+                mean_scale_ctx = torch.cat([mean, scale, prob], dim=-1)
+                scale = torch.clamp(scale, min=1e-3)
                 bit_feat = 0
                 for cc in range(5):
-                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
-                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
-                    probs = torch.softmax(probs, dim=-1)
+                    mean_list, scale_list, probs_list = self.get_feat_mixture(
+                        feat, mean[:, cc*10:cc*10+10], scale[:, cc*10:cc*10+10], prob[:, cc*10:cc*10+10],
+                        mean_scale_ctx=mean_scale_ctx, to_dec=cc)
                     feat_tmp = feat[:, cc*10:cc*10+10].contiguous().view(-1)
                     Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
                     bit_feat += encoder_gaussian_mixed_chunk(
                         feat_tmp,
-                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                        [scale[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
-                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        [m.contiguous().view(-1) for m in mean_list],
+                        [s.contiguous().view(-1) for s in scale_list],
+                        [p.contiguous().view(-1) for p in probs_list],
                         Q_feat_tmp,
                         file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
                 t_feature += get_time() - t_feature_0
@@ -1781,17 +2323,20 @@ class GaussianModel(nn.Module):
                 # Two-stage: Stage 1 = scaling/offsets (no conditioning), Stage 2 = feat (conditioned on scaling/offset)
                 # Stage 1: encode scaling/offsets without conditioning
                 feat_context_no_cond = self.calc_interp_feat(anchor_slice)
-                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
                     torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
+                # Q_feat_adj deliberately comes from this unconditioned stage-1 pass, not stage 2
+                # below -- see gaussian_renderer/__init__.py for why.
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, self.feat_dim)
 
                 Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
                 Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
                 mean_scaling = mean_scaling.contiguous().view(-1)
                 mean_offsets = mean_offsets.contiguous().view(-1)
-                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-                Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-                Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-3)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-3)
+                Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
+                Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
 
                 t_scaling_0 = get_time()
                 scaling = _scaling[N_start:N_end].view(-1)
@@ -1819,31 +2364,30 @@ class GaussianModel(nn.Module):
 
                 # Stage 2: encode feat conditioned on quantized scaling and offset
                 feat_context_with_scale_offset = self.calc_interp_feat(anchor_slice, anchor_scale=scaling_for_cond, anchor_offset=offsets_for_cond)
-                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                mean, scale, prob, _, _, _, _, _, _, _ = \
                     torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
-                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
-                Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+                Q_feat = torch.clamp(Q_feat * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
 
                 feat = _feat[N_start:N_end]
                 feat = STE_multistep.apply(feat, Q_feat, self._anchor_feat.mean())
                 torch.cuda.synchronize(); t0 = time.time()
 
                 t_feature_0 = get_time()
-                mean_scale = torch.cat([mean, scale, prob], dim=-1)
-                scale_feat = torch.clamp(scale, min=1e-9)
+                mean_scale_ctx = torch.cat([mean, scale, prob], dim=-1)
+                scale_feat = torch.clamp(scale, min=1e-3)
                 bit_feat = 0
                 for cc in range(5):
-                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat, mean_scale, to_dec=cc)
-                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
-                    probs = torch.softmax(probs, dim=-1)
+                    mean_list, scale_list, probs_list = self.get_feat_mixture(
+                        feat, mean[:, cc*10:cc*10+10], scale_feat[:, cc*10:cc*10+10], prob[:, cc*10:cc*10+10],
+                        mean_scale_ctx=mean_scale_ctx, to_dec=cc)
                     feat_tmp = feat[:, cc*10:cc*10+10].contiguous().view(-1)
                     Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
                     bit_feat += encoder_gaussian_mixed_chunk(
                         feat_tmp,
-                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                        [scale_feat[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
-                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        [m.contiguous().view(-1) for m in mean_list],
+                        [s.contiguous().view(-1) for s in scale_list],
+                        [p.contiguous().view(-1) for p in probs_list],
                         Q_feat_tmp,
                         file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
                 t_feature += get_time() - t_feature_0
@@ -1856,6 +2400,21 @@ class GaussianModel(nn.Module):
         bit_feat = sum(bit_feat_list)
         bit_scaling = sum(bit_scaling_list)
         bit_offsets = sum(bit_offsets_list)
+
+        if _dbg_mean:
+            _m = torch.cat(_dbg_mean); _s = torch.cat(_dbg_scale); _p = torch.cat(_dbg_prob)
+            _q = torch.cat(_dbg_qfeat); _f = torch.cat(_dbg_feat)
+            print(f"[DEBUG conduct_encoding] mean: {_m.mean().item():.4f}/{_m.std().item():.4f} "
+                  f"scale: {_s.mean().item():.4f}/{_s.std().item():.4f} "
+                  f"prob: {_p.mean().item():.4f}/{_p.std().item():.4f} "
+                  f"Q_feat: {_q.mean().item():.6f}/{_q.std().item():.6f} min={_q.min().item():.6f} max={_q.max().item():.6f} "
+                  f"feat: {_f.mean().item():.4f}/{_f.std().item():.4f} N={_f.shape[0]}")
+            _sc = torch.cat(_dbg_scaling_cond); _oc = torch.cat(_dbg_offsets_cond)
+            _hfc = torch.cat(_dbg_hfc); _fctx = torch.cat(_dbg_fctx)
+            print(f"[DEBUG2 conduct_encoding] scaling_for_cond: {_sc.mean().item():.4f}/{_sc.std().item():.4f} "
+                  f"offsets_for_cond: {_oc.mean().item():.4f}/{_oc.std().item():.4f} "
+                  f"hash_feats_cond: {_hfc.mean().item():.4f}/{_hfc.std().item():.4f} "
+                  f"feat_context: {_fctx.mean().item():.4f}/{_fctx.std().item():.4f}")
 
         t_hash_0 = get_time()
         hash_embeddings = self.get_encoding_params()  # {-1, 1}
@@ -1954,9 +2513,14 @@ class GaussianModel(nn.Module):
             hash_embeddings = hash_embeddings.view(-1, self.n_features_per_level)
         t_hash += get_time() - t_hash_0
 
-        # Pre-compute causal KNN context for all decoded anchors (already in Morton order)
+        # Pre-compute causal KNN context for all decoded anchors (already in Morton order).
+        # Two-stage, mirroring conduct_encoding: the expensive neighbor search is shared between
+        # stages, only the cheap calc_interp_feat + apply_fusion is redone per chunk for stage 2
+        # so feat's context can condition on the just-decoded scaling/offset via FiLM.
         if self.use_causal_knn:
-            all_feat_context_dec = self.causal_knn(self.calc_interp_feat(anchor_decoded), anchor_decoded, chunk_size=MAX_batch_size)
+            _hash_feats_all_dec = self.calc_interp_feat(anchor_decoded)
+            causal_ctx_all_dec = self.causal_knn.aggregate_only(_hash_feats_all_dec, anchor_decoded, chunk_size=MAX_batch_size)
+            all_feat_context_no_cond_dec = self.causal_knn.apply_fusion(_hash_feats_all_dec, causal_ctx_all_dec)
 
         for s in range(steps):
 
@@ -1975,21 +2539,22 @@ class GaussianModel(nn.Module):
             anchor_sort = anchor_decoded[N_start:N_end]
 
             if self.use_causal_knn:
-                # Single-stage: all parameters use pre-computed causal context
-                feat_context = all_feat_context_dec[N_start:N_end]
-                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                    self.forward_grid(feat_context)
+                # Two-stage (see precompute comment above): stage 1 = scaling/offsets from the
+                # unconditioned context.
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                    self.forward_grid(all_feat_context_no_cond_dec[N_start:N_end])
+                # Q_feat_adj deliberately comes from this unconditioned stage-1 pass, matching
+                # conduct_encoding -- see gaussian_renderer/__init__.py for why.
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, self.feat_dim)
 
-                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
                 Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
                 Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
                 mean_scaling = mean_scaling.contiguous().view(-1)
                 mean_offsets = mean_offsets.contiguous().view(-1)
-                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-                Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
-                Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-                Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-3)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-3)
+                Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
+                Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
 
                 t_scaling_0 = get_time()
                 scaling_decoded = decoder_gaussian_chunk(mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
@@ -2006,19 +2571,26 @@ class GaussianModel(nn.Module):
                 offsets_decoded_list.append(offsets_decoded)
                 t_offset += get_time() - t_offset_0
 
+                # Stage 2: feat conditioned on the just-decoded scaling/offset via FiLM
+                hash_feats_cond = self.calc_interp_feat(anchor_sort, anchor_scale=scaling_decoded.detach(), anchor_offset=offsets_decoded.detach())
+                feat_context = self.causal_knn.apply_fusion(hash_feats_cond, causal_ctx_all_dec[N_start:N_end])
+                mean, scale, prob, _, _, _, _, _, _, _ = \
+                    self.forward_grid(feat_context)
+                Q_feat = torch.clamp(Q_feat * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
+
                 t_feature_0 = get_time()
                 feat_decoded = torch.zeros(size=[N_num, self.feat_dim], device='cuda', dtype=torch.float32)
-                mean_scale = torch.cat([mean, scale, prob], dim=-1)
-                scale = torch.clamp(scale, min=1e-9)
+                mean_scale_ctx = torch.cat([mean, scale, prob], dim=-1)
+                scale = torch.clamp(scale, min=1e-3)
                 for cc in range(5):
-                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
-                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
-                    probs = torch.softmax(probs, dim=-1)
+                    mean_list, scale_list, probs_list = self.get_feat_mixture(
+                        feat_decoded, mean[:, cc*10:cc*10+10], scale[:, cc*10:cc*10+10], prob[:, cc*10:cc*10+10],
+                        mean_scale_ctx=mean_scale_ctx, to_dec=cc)
                     Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
                     feat_decoded_tmp = decoder_gaussian_mixed_chunk(
-                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                        [scale[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
-                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        [m.contiguous().view(-1) for m in mean_list],
+                        [s.contiguous().view(-1) for s in scale_list],
+                        [p.contiguous().view(-1) for p in probs_list],
                         Q_feat_tmp,
                         file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
                     feat_decoded_tmp = feat_decoded_tmp.view(N_num, 10)
@@ -2030,17 +2602,20 @@ class GaussianModel(nn.Module):
                 # Two-stage: Stage 1 = scaling/offsets (no conditioning), Stage 2 = feat (conditioned on scaling/offset)
                 # Stage 1: decode scaling/offsets without conditioning
                 feat_context_no_cond = self.calc_interp_feat(anchor_sort)
-                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
                     torch.split(self.get_grid_mlp(feat_context_no_cond), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
+                # Q_feat_adj deliberately comes from this unconditioned stage-1 pass, matching
+                # conduct_encoding -- see gaussian_renderer/__init__.py for why.
+                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, self.feat_dim)
 
                 Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1]).view(-1)
                 Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1]).view(-1)
                 mean_scaling = mean_scaling.contiguous().view(-1)
                 mean_offsets = mean_offsets.contiguous().view(-1)
-                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-9)
-                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-9)
-                Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-                Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
+                scale_scaling = torch.clamp(scale_scaling.contiguous().view(-1), min=1e-3)
+                scale_offsets = torch.clamp(scale_offsets.contiguous().view(-1), min=1e-3)
+                Q_scaling = torch.clamp(Q_scaling * (1 + torch.tanh(Q_scaling_adj)), min=0.00001)
+                Q_offsets = torch.clamp(Q_offsets * (1 + torch.tanh(Q_offsets_adj)), min=0.0001)
 
                 t_scaling_0 = get_time()
                 scaling_decoded = decoder_gaussian_chunk(mean_scaling, scale_scaling, Q_scaling, file_name=scaling_b_name, chunk_size=10_0000)
@@ -2059,25 +2634,24 @@ class GaussianModel(nn.Module):
 
                 # Stage 2: decode feat conditioned on decoded scaling and offset
                 feat_context_with_scale_offset = self.calc_interp_feat(anchor_sort, anchor_scale=scaling_decoded.detach(), anchor_offset=offsets_decoded.detach())
-                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                mean, scale, prob, _, _, _, _, _, _, _ = \
                     torch.split(self.get_grid_mlp(feat_context_with_scale_offset), split_size_or_sections=[self.feat_dim, self.feat_dim, self.feat_dim, 6, 6, 3 * self.n_offsets, 3 * self.n_offsets, 1, 1, 1], dim=-1)
 
-                Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
-                Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+                Q_feat = torch.clamp(Q_feat * (1 + torch.tanh(Q_feat_adj)), min=0.0001)
 
                 t_feature_0 = get_time()
                 feat_decoded = torch.zeros(size=[N_num, self.feat_dim], device='cuda', dtype=torch.float32)
-                mean_scale = torch.cat([mean, scale, prob], dim=-1)
-                scale_feat = torch.clamp(scale, min=1e-9)
+                mean_scale_ctx = torch.cat([mean, scale, prob], dim=-1)
+                scale_feat = torch.clamp(scale, min=1e-3)
                 for cc in range(5):
-                    mean_adj, scale_adj, prob_adj = self.get_deform_mlp.forward(feat_decoded, mean_scale, to_dec=cc)
-                    probs = torch.stack([prob[:, cc*10:cc*10+10], prob_adj], dim=-1)
-                    probs = torch.softmax(probs, dim=-1)
+                    mean_list, scale_list, probs_list = self.get_feat_mixture(
+                        feat_decoded, mean[:, cc*10:cc*10+10], scale_feat[:, cc*10:cc*10+10], prob[:, cc*10:cc*10+10],
+                        mean_scale_ctx=mean_scale_ctx, to_dec=cc)
                     Q_feat_tmp = Q_feat[:, cc*10:cc*10+10].contiguous().view(-1)
                     feat_decoded_tmp = decoder_gaussian_mixed_chunk(
-                        [mean[:, cc*10:cc*10+10].contiguous().view(-1), mean_adj.contiguous().view(-1)],
-                        [scale_feat[:, cc*10:cc*10+10].contiguous().view(-1), scale_adj.contiguous().view(-1)],
-                        [probs[..., 0].contiguous().view(-1), probs[..., 1].contiguous().view(-1)],
+                        [m.contiguous().view(-1) for m in mean_list],
+                        [s.contiguous().view(-1) for s in scale_list],
+                        [p.contiguous().view(-1) for p in probs_list],
                         Q_feat_tmp,
                         file_name=feat_b_name.replace('.b', f'_{cc}.b'), chunk_size=50_0000)
                     feat_decoded_tmp = feat_decoded_tmp.view(N_num, 10)

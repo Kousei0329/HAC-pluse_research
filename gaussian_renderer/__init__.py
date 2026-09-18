@@ -87,14 +87,32 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
                     feat_ctx_render[_vis_inmsk] = pc.causal_knn.apply_fusion(_vis_hf, _vis_ctx)
             else:
                 # causal_knn なし: visible アンカーのハッシュ特徴を直接使用
+                # Unconditioned, matching the causal_knn branch above: conditioning this
+                # noise-scale pre-pass on the anchor's own true feat value (as this used to do
+                # via anchor_feat=feat[...]) is a self-referential loop -- the current feat value
+                # would decide how much noise gets added back onto itself -- and empirically drove
+                # Q_feat_adj to saturate at its ceiling (Q_feat -> ~2, very coarse quantization
+                # noise), degrading PSNR/SSIM/LPIPS without a compensating rate benefit.
                 _morton_vis = calculate_morton_order(torch.round(anchor / pc.voxel_size).long())
                 _unsort_vis = torch.argsort(_morton_vis)
-                feat_ctx_render = pc.calc_interp_feat(anchor[_morton_vis],
-                                                      anchor_feat=feat[_morton_vis])[_unsort_vis]
+                feat_ctx_render = pc.calc_interp_feat(anchor[_morton_vis])[_unsort_vis]
 
             mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
                 pc.forward_grid(feat_ctx_render)
 
+            if step % 1000 == 0:
+                print(f"[DEBUG Q_feat_prepass] step={step} Q_feat_adj: {Q_feat_adj.mean().item():.4f}/{Q_feat_adj.std().item():.4f} "
+                      f"Q_feat: {(Q_feat*(1+torch.tanh(Q_feat_adj))).mean().item():.4f}")
+                if pc.use_level_gate:
+                    for gate_name in ['gate_xyz', 'gate_xy', 'gate_xz', 'gate_yz']:
+                        g = getattr(pc.encoding_xyz, gate_name, None)
+                        if g is not None and hasattr(g, '_last_gate_mean'):
+                            gm = g._last_gate_mean.tolist()
+                            gs = g._last_gate_std.tolist()
+                            print(f"[DEBUG LevelSEGate {gate_name}] step={step} "
+                                  f"per-level mean={['%.3f' % v for v in gm]} "
+                                  f"std={['%.3f' % v for v in gs]} "
+                                  f"(init was a uniform 0.881 for every level)")
             Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
             Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
             Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj))
@@ -110,28 +128,56 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
             grid_scaling_chosen      = pc.get_scaling[mask_anchor_all][_choose]
             binary_grid_masks_chosen = pc.get_mask[mask_anchor_all][_choose]
             mask_anchor_chosen       = pc.get_mask_anchor[mask_anchor_all][_choose]
+            # Pruned (masked-off) offset slots are never trained against any rendering loss, so
+            # their raw value is unconstrained garbage; zero them out before conditioning feat's
+            # context on them, matching what the real decoder actually sees (0 for those slots).
+            # Conditioning on the raw value here is a train/inference mismatch with
+            # conduct_encoding()/conduct_decoding(), which always mask before conditioning.
+            grid_offsets_chosen_masked = grid_offsets_chosen * binary_grid_masks_chosen.repeat(1, 1, 3)
 
             if pc.use_causal_knn:
-                # codec では anchor_feat を渡せないため、訓練時も使わない（train-codec 一致）
-                _chosen_hf  = pc.calc_interp_feat(anchor_chosen)
+                # Two-stage, matching the non-causal_knn branch below: stage 1 (unconditioned)
+                # drives scaling/offset's own entropy params (nothing to condition on yet -- they
+                # are decoded first); stage 2 FiLM-conditions this anchor's own hash feature on its
+                # true scaling/offset before fusing with the *same* precomputed neighbor context
+                # (_ctx_msk), so feat's entropy params can actually see scaling/offset. Reusing
+                # _ctx_msk avoids re-running the expensive O(N*K) causal KNN search a second time --
+                # only the cheap per-anchor calc_interp_feat + apply_fusion is duplicated, exactly
+                # mirroring the cost the non-causal_knn branch already pays for its two calc_interp_feat calls.
                 _chosen_ctx = _ctx_msk[_choose]
-                feat_context_orig = pc.causal_knn.apply_fusion(_chosen_hf, _chosen_ctx)
+                _chosen_hf_no_cond = pc.calc_interp_feat(anchor_chosen)
+                feat_context_no_cond = pc.causal_knn.apply_fusion(_chosen_hf_no_cond, _chosen_ctx)
+                _chosen_hf_cond = pc.calc_interp_feat(anchor_chosen,
+                                                       anchor_scale=grid_scaling_chosen,
+                                                       anchor_offset=grid_offsets_chosen_masked.view(grid_offsets_chosen.shape[0], pc.n_offsets, 3))
+                feat_context_orig = pc.causal_knn.apply_fusion(_chosen_hf_cond, _chosen_ctx)
             else:
                 # two-stage: scaling/offset を先に計算し、feat は scaling/offset で条件付け
                 feat_context_no_cond = pc.calc_interp_feat(anchor_chosen)
                 feat_context_orig = pc.calc_interp_feat(anchor_chosen,
                                                         anchor_scale=grid_scaling_chosen,
-                                                        anchor_offset=grid_offsets_chosen.view(grid_offsets_chosen.shape[0], pc.n_offsets, 3))
+                                                        anchor_offset=grid_offsets_chosen_masked.view(grid_offsets_chosen.shape[0], pc.n_offsets, 3))
 
             '''GMM使用'''
-            if pc.use_causal_knn:
-                mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                    pc.forward_grid(feat_context_orig)
-            else:
-                _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
-                    pc.forward_grid(feat_context_no_cond)
-                mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
-                    pc.forward_grid(feat_context_orig)
+            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj_no_cond, Q_scaling_adj, Q_offsets_adj = \
+                pc.forward_grid(feat_context_no_cond)
+            mean, scale, prob, _, _, _, _, Q_feat_adj_cond, _, _ = \
+                pc.forward_grid(feat_context_orig)
+            # Always read Q_feat_adj from the unconditioned stage-1 pass, never from the
+            # FiLM-conditioned one. This was already required for causal_knn (its fusion module
+            # collapsed Q_feat toward its floor when driven by a conditioned input). The
+            # non-causal_knn branch was left on the conditioned source because it looked stable
+            # historically, but that data predates the offsets-masking fix above -- with offsets
+            # now correctly zeroed for pruned slots before conditioning, the conditioned context's
+            # distribution changed, and empirically Q_feat_adj_cond now saturates toward its
+            # ceiling here (Q_feat -> ~2, i.e. very coarse feat quantization): smaller feat bits
+            # but visibly worse PSNR/SSIM/LPIPS. Q_feat_adj_cond is computed only for debug
+            # comparison below.
+            if abs(Q_feat_adj_no_cond.mean().item() - Q_feat_adj_cond.mean().item()) > 1e-6 and step % 1000 == 0:
+                print(f"[DEBUG Q_feat_adj] step={step} no_cond: {Q_feat_adj_no_cond.mean().item():.4f}/{Q_feat_adj_no_cond.std().item():.4f} "
+                      f"cond: {Q_feat_adj_cond.mean().item():.4f}/{Q_feat_adj_cond.std().item():.4f} "
+                      f"Q_feat_if_cond: {(1*(1+torch.tanh(Q_feat_adj_cond))).mean().item():.4f}")
+            Q_feat_adj = Q_feat_adj_no_cond
 
             Q_feat = 1
             # Q_scaling変更
@@ -146,11 +192,10 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
             Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
             # Quantization noise for entropy calculation - now deterministic with global seed
             feat_chosen = feat_chosen + torch.empty_like(feat_chosen).uniform_(-0.5, 0.5) * Q_feat
-            # mean_adj, scale_adj, prob_adj, gate = pc.get_deform_mlp.forward(feat_chosen, torch.cat([mean, scale, prob], dim=-1))
-            mean_adj, scale_adj, prob_adj = pc.get_deform_mlp.forward(feat_chosen, torch.cat([mean, scale, prob], dim=-1))
+            mean_list, scale_list, probs_list = pc.get_feat_mixture(feat_chosen, mean, scale, prob)
 
             # Debug: NaN/Inf check before entropy calculation
-            for dbg_name, dbg_t in [('mean', mean), ('scale', scale), ('mean_adj', mean_adj), ('scale_adj', scale_adj),
+            for dbg_name, dbg_t in [('mean', mean), ('scale', scale), ('mean_adj', mean_list[1]), ('scale_adj', scale_list[1]),
                                     ('feat_chosen', feat_chosen), ('Q_feat', Q_feat)]:
                 if torch.is_tensor(dbg_t):
                     n_nan = torch.isnan(dbg_t).sum().item()
@@ -158,19 +203,15 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
                     if n_nan > 0 or n_inf > 0:
                         print(f"[renderer] WARNING: {dbg_name} has {n_nan} NaN, {n_inf} Inf  (step={step})")
 
-            probs = torch.stack([prob, prob_adj], dim=-1)
-            probs = torch.softmax(probs, dim=-1)
             grid_scaling_chosen = grid_scaling_chosen + torch.empty_like(grid_scaling_chosen).uniform_(-0.5, 0.5) * Q_scaling
             grid_offsets_chosen = grid_offsets_chosen + torch.empty_like(grid_offsets_chosen).uniform_(-0.5, 0.5) * Q_offsets
             grid_offsets_chosen = grid_offsets_chosen.view(-1, 3 * pc.n_offsets)
 
             binary_grid_masks_chosen = binary_grid_masks_chosen.repeat(1, 1, 3).view(-1, 3*pc.n_offsets)
 
-            bit_feat = pc.EG_mix_prob_2.forward(feat_chosen,
-                                                mean, mean_adj,
-                                                scale, scale_adj,
-                                                probs[..., 0], probs[..., 1],
-                                                Q=Q_feat, x_mean=pc._anchor_feat.mean())
+            EG = pc.EG_mix_prob_3 if pc.use_3gmm else pc.EG_mix_prob_2
+            bit_feat = EG.forward(feat_chosen, *mean_list, *scale_list, *probs_list,
+                                   Q=Q_feat, x_mean=pc._anchor_feat.mean())
             bit_feat = bit_feat * mask_anchor_chosen
             bit_scaling = pc.entropy_gaussian.forward(grid_scaling_chosen, mean_scaling, scale_scaling, Q_scaling, pc.get_scaling.mean())
             bit_scaling = bit_scaling * mask_anchor_chosen
@@ -190,24 +231,20 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
         unsort_idx = torch.argsort(morton_idx)
         anchor_sorted = anchor[morton_idx]
         if pc.use_causal_knn:
+            # Two-stage, mirroring the non-causal_knn branch below. The expensive O(N*K) neighbor
+            # search (aggregate_only) runs once and is reused for both stages; only the cheap
+            # per-anchor calc_interp_feat + apply_fusion is duplicated so stage 2 can actually see
+            # the quantized scaling/offset via FiLM (AnchorCondNorm).
             hash_feats = pc.calc_interp_feat(anchor_sorted)
-            feat_context = pc.causal_knn(hash_feats, anchor_sorted)
-            feat_context = feat_context[unsort_idx]
-            mean, scale, prob, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
-                pc.forward_grid(feat_context)
-            Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
-            Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
-            Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1])
-            Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
-            Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
-            Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
-            feat = (STE_multistep.apply(feat, Q_feat, pc._anchor_feat.mean())).detach()
-            grid_scaling = (STE_multistep.apply(grid_scaling, Q_scaling, pc.get_scaling.mean())).detach()
-            grid_offsets = (STE_multistep.apply(grid_offsets, Q_offsets, pc._offset.mean())).detach()
-        else:
-            # Stage 1: get Q_scaling/Q_offsets from unconditioned context
-            feat_context_no_cond = pc.calc_interp_feat(anchor_sorted)[unsort_idx]
-            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, _, Q_scaling_adj, Q_offsets_adj = \
+            causal_ctx = pc.causal_knn.aggregate_only(hash_feats, anchor_sorted)
+            feat_context_no_cond = pc.causal_knn.apply_fusion(hash_feats, causal_ctx)[unsort_idx]
+            # Q_feat_adj (the feat quantization-step multiplier) is deliberately read from the
+            # *unconditioned* stage-1 context, not stage 2 below -- this is the same context
+            # mlp_grid always used for it under causal_knn historically, so it stays in the regime
+            # mlp_grid is actually calibrated for. Predicting it from the FiLM-conditioned stage-2
+            # context (as the non-causal_knn branch does) let it collapse toward its floor early
+            # in training here, exploding the quantized value range and OOMing the arithmetic coder.
+            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
                 pc.forward_grid(feat_context_no_cond)
             Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
             Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1])
@@ -215,11 +252,38 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
             Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
             grid_scaling = (STE_multistep.apply(grid_scaling, Q_scaling, pc.get_scaling.mean())).detach()
             grid_offsets = (STE_multistep.apply(grid_offsets, Q_offsets, pc._offset.mean())).detach()
-            # Stage 2: get Q_feat conditioned on quantized scaling/offsets
+            # Mask before conditioning only (not the shared grid_offsets, which downstream
+            # rendering still needs raw for the offset_selection_mask path) -- see the training
+            # branch above for why unmasked pruned slots corrupt feat's FiLM context.
+            grid_offsets_for_cond = grid_offsets * binary_grid_masks.repeat(1, 1, 3)
+
+            hash_feats_cond = pc.calc_interp_feat(anchor_sorted,
+                                                   grid_scaling[morton_idx],
+                                                   grid_offsets_for_cond[morton_idx])
+            feat_context_cond = pc.causal_knn.apply_fusion(hash_feats_cond, causal_ctx)[unsort_idx]
+            mean, scale, prob, _, _, _, _, _, _, _ = \
+                pc.forward_grid(feat_context_cond)
+            Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
+            Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))
+            feat = (STE_multistep.apply(feat, Q_feat, pc._anchor_feat.mean())).detach()
+        else:
+            # Stage 1: get Q_scaling/Q_offsets from unconditioned context
+            feat_context_no_cond = pc.calc_interp_feat(anchor_sorted)[unsort_idx]
+            _, _, _, mean_scaling, scale_scaling, mean_offsets, scale_offsets, Q_feat_adj, Q_scaling_adj, Q_offsets_adj = \
+                pc.forward_grid(feat_context_no_cond)
+            Q_scaling_adj = Q_scaling_adj.contiguous().repeat(1, mean_scaling.shape[-1])
+            Q_offsets_adj = Q_offsets_adj.contiguous().repeat(1, mean_offsets.shape[-1])
+            Q_scaling = Q_scaling * (1 + torch.tanh(Q_scaling_adj))
+            Q_offsets = Q_offsets * (1 + torch.tanh(Q_offsets_adj)).view(-1, pc.n_offsets, 3)
+            grid_scaling = (STE_multistep.apply(grid_scaling, Q_scaling, pc.get_scaling.mean())).detach()
+            grid_offsets = (STE_multistep.apply(grid_offsets, Q_offsets, pc._offset.mean())).detach()
+            grid_offsets_for_cond = grid_offsets * binary_grid_masks.repeat(1, 1, 3)
+            # Stage 2: feat's mean/scale/prob still come from the conditioned context; Q_feat_adj
+            # (captured above from stage 1) deliberately does not -- see the training branch above.
             feat_context_cond = pc.calc_interp_feat(anchor_sorted,
                                                      grid_scaling[morton_idx],
-                                                     grid_offsets[morton_idx])[unsort_idx]
-            mean, scale, prob, _, _, _, _, Q_feat_adj, _, _ = \
+                                                     grid_offsets_for_cond[morton_idx])[unsort_idx]
+            mean, scale, prob, _, _, _, _, _, _, _ = \
                 pc.forward_grid(feat_context_cond)
             Q_feat_adj = Q_feat_adj.contiguous().repeat(1, mean.shape[-1])
             Q_feat = Q_feat * (1 + torch.tanh(Q_feat_adj))

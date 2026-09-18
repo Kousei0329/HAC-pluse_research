@@ -213,11 +213,23 @@ def encoder_gaussian_mixed(x, mean_list, scale_list, prob_list, Q, file_name='tm
 
     # 量子化後の範囲が大きすぎる場合はチェック
     value_range = int(max_value.item() - min_value.item())
-    max_allowed_range = 100000  # メモリ制限: 範囲の上限
+    max_allowed_range = 60000  # CUDA arithmetic coder hardcodes precision=16 (new_max_value = 65536 - (Lp-1)); any value_range >= 65536 makes new_max_value <= 0, silently corrupting encode/decode (wrong symbols, no error) instead of raising. 60000 keeps a safety margin under that hard ceiling.
+    q_widen_factor = 1.0
     if value_range > max_allowed_range:
-        print(f"[ERROR] Quantized range too large for {file_name}: {value_range} (limit: {max_allowed_range})")
-        print(f"[ERROR] min_value={min_value.item()}, max_value={max_value.item()}, Q range: {Q.min().item():.6f}-{Q.max().item():.6f}")
-        raise RuntimeError(f"Quantization range {value_range} exceeds maximum allowed range {max_allowed_range}. Consider using larger Q values.")
+        # See encoder_gaussian for why this widens Q (recorded in the file header for the
+        # decoder to mirror) instead of splitting the batch.
+        q_widen_factor = float(np.ceil(value_range / max_allowed_range)) + 0.5
+        print(f"[INFO] Quantized range too large for {file_name}: {value_range} (limit: {max_allowed_range}); "
+              f"widening Q by {q_widen_factor}x and re-quantizing.")
+        Q = Q * q_widen_factor
+        x_int_round = torch.round(x / Q)
+        max_value = x_int_round.max()
+        min_value = x_int_round.min()
+        value_range = int(max_value.item() - min_value.item())
+        if value_range > max_allowed_range:
+            print(f"[ERROR] Quantized range still too large for {file_name} after widening Q by {q_widen_factor}x: {value_range} (limit: {max_allowed_range})")
+            print(f"[ERROR] min_value={min_value.item()}, max_value={max_value.item()}, Q range: {Q.min().item():.6f}-{Q.max().item():.6f}")
+            raise RuntimeError(f"Quantization range {value_range} exceeds maximum allowed range {max_allowed_range} even after widening Q. Consider using larger base Q values.")
 
     try:
         lower_all = int(0)
@@ -331,10 +343,11 @@ def encoder_gaussian_mixed(x, mean_list, scale_list, prob_list, Q, file_name='tm
     with open(file_name, 'wb') as fout:
         fout.write(min_value.to(torch.float32).cpu().numpy().tobytes())
         fout.write(max_value.to(torch.float32).cpu().numpy().tobytes())
+        fout.write(np.array([q_widen_factor]).astype(np.float32).tobytes())
         fout.write(np.array([len_cnt_bytes]).astype(np.int32).tobytes())
         fout.write(cnt_bytes)
         fout.write(byte_stream_bytes)
-    bit_len = (len(byte_stream_bytes) + len(cnt_bytes))*8 + 32 * 3
+    bit_len = (len(byte_stream_bytes) + len(cnt_bytes))*8 + 32 * 4
     return bit_len
 
 
@@ -371,9 +384,15 @@ def decoder_gaussian_mixed(mean_list, scale_list, prob_list, Q, file_name='tmp.b
     with open(file_name, 'rb') as fin:
         min_value = torch.tensor(np.frombuffer(fin.read(4), dtype=np.float32).copy(), device="cuda")
         max_value = torch.tensor(np.frombuffer(fin.read(4), dtype=np.float32).copy(), device="cuda")
+        q_widen_factor = float(np.frombuffer(fin.read(4), dtype=np.float32)[0])
         len_cnt_bytes = np.frombuffer(fin.read(4), dtype=np.int32)[0]
         cnt_torch = torch.tensor(np.frombuffer(fin.read(len_cnt_bytes), dtype=np.int32).copy(), device="cuda")
         byte_stream_torch = torch.tensor(np.frombuffer(fin.read(), dtype=np.uint8).copy(), device="cuda")
+
+    if q_widen_factor != 1.0:
+        # Mirrors the encoder-side widening applied when the batch's quantized range would
+        # otherwise overflow the arithmetic coder's 16-bit precision -- see encoder_gaussian_mixed.
+        Q = Q * q_widen_factor
 
     lower_all = int(0)
     for (mean, scale, prob) in zip(mean_list, scale_list, prob_list):
@@ -438,11 +457,27 @@ def encoder_gaussian(x, mean, scale, Q, file_name='tmp.b', retry_count=0, max_re
 
     # 量子化後の範囲が大きすぎる場合はチェック
     value_range = int(max_value.item() - min_value.item())
-    max_allowed_range = 100000  # メモリ制限: 範囲の上限
+    max_allowed_range = 60000  # CUDA arithmetic coder hardcodes precision=16 (new_max_value = 65536 - (Lp-1)); any value_range >= 65536 makes new_max_value <= 0, silently corrupting encode/decode (wrong symbols, no error) instead of raising. 60000 keeps a safety margin under that hard ceiling.
+    q_widen_factor = 1.0
     if value_range > max_allowed_range:
-        print(f"[ERROR] Quantized range too large for {file_name}: {value_range} (limit: {max_allowed_range})")
-        print(f"[ERROR] min_value={min_value.item()}, max_value={max_value.item()}, Q range: {Q.min().item():.6f}-{Q.max().item():.6f}")
-        raise RuntimeError(f"Quantization range {value_range} exceeds maximum allowed range {max_allowed_range}. Consider using larger Q values.")
+        # Splitting the batch (like the CUDA-error retry path below) doesn't work here: the
+        # decoder has no way to know a batch was split (it has no counterpart for reading
+        # _part0.b/_part1.b), so instead widen Q just enough to bring the range back under the
+        # ceiling and re-quantize with it. q_widen_factor is written into the file header so the
+        # decoder -- which independently recomputes Q from the same model but obviously wasn't
+        # there for this decision -- can apply the identical widening before building its CDF.
+        q_widen_factor = float(np.ceil(value_range / max_allowed_range)) + 0.5
+        print(f"[INFO] Quantized range too large for {file_name}: {value_range} (limit: {max_allowed_range}); "
+              f"widening Q by {q_widen_factor}x and re-quantizing.")
+        Q = Q * q_widen_factor
+        x_int_round = torch.round(x / Q)
+        max_value = x_int_round.max()
+        min_value = x_int_round.min()
+        value_range = int(max_value.item() - min_value.item())
+        if value_range > max_allowed_range:
+            print(f"[ERROR] Quantized range still too large for {file_name} after widening Q by {q_widen_factor}x: {value_range} (limit: {max_allowed_range})")
+            print(f"[ERROR] min_value={min_value.item()}, max_value={max_value.item()}, Q range: {Q.min().item():.6f}-{Q.max().item():.6f}")
+            raise RuntimeError(f"Quantization range {value_range} exceeds maximum allowed range {max_allowed_range} even after widening Q. Consider using larger base Q values.")
 
     try:
         lower = arithmetic.calculate_cdf(
@@ -541,10 +576,11 @@ def encoder_gaussian(x, mean, scale, Q, file_name='tmp.b', retry_count=0, max_re
     with open(file_name, 'wb') as fout:
         fout.write(min_value.to(torch.float32).cpu().numpy().tobytes())
         fout.write(max_value.to(torch.float32).cpu().numpy().tobytes())
+        fout.write(np.array([q_widen_factor]).astype(np.float32).tobytes())
         fout.write(np.array([len_cnt_bytes]).astype(np.int32).tobytes())
         fout.write(cnt_bytes)
         fout.write(byte_stream_bytes)
-    bit_len = (len(byte_stream_bytes) + len(cnt_bytes))*8 + 32 * 3
+    bit_len = (len(byte_stream_bytes) + len(cnt_bytes))*8 + 32 * 4
     return bit_len
 
 def decoder_gaussian_chunk(mean, scale, Q, file_name='tmp.b', chunk_size=1000_0000):
@@ -579,9 +615,15 @@ def decoder_gaussian(mean, scale, Q, file_name='tmp.b'):
     with open(file_name, 'rb') as fin:
         min_value = torch.tensor(np.frombuffer(fin.read(4), dtype=np.float32).copy(), device="cuda")
         max_value = torch.tensor(np.frombuffer(fin.read(4), dtype=np.float32).copy(), device="cuda")
+        q_widen_factor = float(np.frombuffer(fin.read(4), dtype=np.float32)[0])
         len_cnt_bytes = np.frombuffer(fin.read(4), dtype=np.int32)[0]
         cnt_torch = torch.tensor(np.frombuffer(fin.read(len_cnt_bytes), dtype=np.int32).copy(), device="cuda")
         byte_stream_torch = torch.tensor(np.frombuffer(fin.read(), dtype=np.uint8).copy(), device="cuda")
+
+    if q_widen_factor != 1.0:
+        # Mirrors the encoder-side widening applied when the batch's quantized range would
+        # otherwise overflow the arithmetic coder's 16-bit precision -- see encoder_gaussian.
+        Q = Q * q_widen_factor
 
     lower = arithmetic.calculate_cdf(
         mean,

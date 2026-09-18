@@ -3,32 +3,26 @@ import subprocess
 from datetime import datetime
 import time
 import json
-from pathlib import Path
 
 os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9'
 os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
-# RENO's torchsparse kernels JIT-compile via NVRTC at runtime; this sandbox's own PyTorch install
-# only bundles an 11.6 NVRTC (no sm_89/Ada support), so it fails invalid --gpu-architecture unless
-# a newer NVRTC (here, HAC_mamba_env's) is put ahead of it in the loader search path.
+# RENO is disabled below, but LD_LIBRARY_PATH doesn't hurt to keep consistent with the other
+# experiment scripts in case a future run re-enables it.
 os.environ['LD_LIBRARY_PATH'] = '/opt/conda/envs/HAC_mamba_env/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
 
 # --- Global Settings ---
-LAMBDAS = [0.001, 0.002, 0.003, 0.004, 0.005]
+# "High rate" (low lambda, less compression, higher quality) and "low rate" (high lambda, more
+# compression) endpoints only -- not a full 5-point sweep -- to check whether the causal_knn_K=8
+# + MLP-fp16 config validated on tandt/truck generalizes to other scene types.
+LAMBDAS = [0.001, 0.005]
+CAUSAL_KNN_K = 8
 GPU_ID = 0
-EXPERIMENT_NAME = "multi_lambda_comparison"
+EXPERIMENT_NAME = "generalization_K8_fp16"
 RANDOM_SEED = 42
 
-# Dataset-specific configurations derived from run_shell_*.py scripts
+# Same per-dataset-family hyperparameters as run_multi_lambda_experiments.py. tandt is
+# deliberately excluded -- this run is specifically about non-tandt generalization.
 DATASET_CONFIGS = {
-    'tandt': {
-        'scenes': ['truck', 'train'],
-        'data_base': '/workspace/HAC/data/tandt',
-        'voxel_size': 0.01,
-        'mask_lr_final_base': 0.0001,
-        'mask_lr_final_max': None,
-        'update_init_factor': 16,
-        'lod': 0,
-    },
     'db': {
         'scenes': ['drjohnson', 'playroom'],
         'data_base': '/workspace/HAC/data/db',
@@ -39,7 +33,9 @@ DATASET_CONFIGS = {
         'lod': 0,
     },
     'mipnerf360': {
-        'scenes': ['bicycle', 'garden', 'stump', 'room', 'counter', 'kitchen', 'bonsai', 'flowers', 'treehill'],
+        # flowers/treehill excluded: only .txt placeholders exist under /workspace/HAC/data/mipnerf360,
+        # no actual COLMAP scene data was downloaded for them.
+        'scenes': ['bicycle', 'garden', 'stump', 'room', 'counter', 'kitchen', 'bonsai'],
         'data_base': '/workspace/HAC/data/mipnerf360',
         'voxel_size': 0.001,
         'mask_lr_final_base': 0.0005,
@@ -57,6 +53,8 @@ DATASET_CONFIGS = {
         'lod': 0,
     },
     'bungeenerf': {
+        # chicago/barcelona excluded: their data folders only contain raw .esp/.json exports, not
+        # the preprocessed COLMAP 'demo' folder the other bungeenerf scenes have.
         'scenes': ['amsterdam', 'bilbao', 'hollywood', 'pompidou', 'quebec', 'rome'],
         'data_base': '/workspace/HAC/data/bungeenerf',
         'voxel_size': 0,
@@ -67,31 +65,23 @@ DATASET_CONFIGS = {
     },
 }
 
-# Select which datasets (and optionally which scenes) to run.
-# To run all scenes in a dataset, just list the dataset name.
-# To run specific scenes only, use a dict: {'tandt': ['truck'], 'db': ['playroom']}
-'''ここで実験したいシーンを選択する。全てのシーンを実験したい場合は、単にデータセット名をリストに入れる。'''
-# ACTIVE_DATASETS = ['tandt', 'db', 'mipnerf360', 'nerf_synthetic', 'bungeenerf']  # <- edit this list to change what runs
-# ACTIVE_DATASETS = [   'nerf_synthetic', 'bungeenerf']  # <- edit this list to change what runs
-ACTIVE_DATASETS = ['tandt']  # <- edit this list to change what runs
+ACTIVE_DATASETS = ['nerf_synthetic', 'bungeenerf']
+# mipnerf360 excluded per user request: bicycle OOM'd on this 16GB GPU (large outdoor scene,
+# anchor count grew too large mid-training) and other big mipnerf360 scenes (garden, stump) were
+# expected to hit the same wall, so it was dropped from this generalization run rather than
+# reworking memory settings. db already completed in the prior run (see the timestamped dir
+# below) and is skipped here to avoid rerunning it.
 
-# Create experiment directory with timestamp
 TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 EXPERIMENT_DIR = f"outputs/experiments/{EXPERIMENT_NAME}_{TIMESTAMP}"
 os.makedirs(EXPERIMENT_DIR, exist_ok=True)
 
 
 def resolve_active_scenes():
-    """Resolve ACTIVE_DATASETS into a list of (dataset_name, scene) pairs."""
     pairs = []
-    if isinstance(ACTIVE_DATASETS, dict):
-        for dataset_name, scenes in ACTIVE_DATASETS.items():
-            for scene in scenes:
-                pairs.append((dataset_name, scene))
-    else:
-        for dataset_name in ACTIVE_DATASETS:
-            for scene in DATASET_CONFIGS[dataset_name]['scenes']:
-                pairs.append((dataset_name, scene))
+    for dataset_name in ACTIVE_DATASETS:
+        for scene in DATASET_CONFIGS[dataset_name]['scenes']:
+            pairs.append((dataset_name, scene))
     return pairs
 
 
@@ -116,11 +106,11 @@ def create_command(lmbda, scene, dataset_name, gpu_id, seed):
         f'--lmbda {lmbda} '
         f'--mask_lr_final {mask_lr_final} '
         f'--seed {seed} '
-        f'--use_3gmm --quantize_mlp_bits 8 --prune_mlp_ratio 0.3 '
-        # RENO/causal_knn/anchor_cond_norm stay on their defaults (True) -- this is the full
-        # "winning" config from the truck/λ=0.004 ablation series (bug fixes + widened
-        # mlp_grid/mlp_deform + 3-component GMM + per-output-channel 8-bit MLP quantization +
-        # gradient clipping on both optimizers), being re-verified across tandt's 2 scenes x 5 λ.
+        f'--causal_knn_K {CAUSAL_KNN_K} '
+        f'--no_use_reno '
+        f'--quantize_mlp_fp16 '
+        # Same config validated on tandt/truck (causal_knn_K=8, RENO off, fp16 entropy MLPs) --
+        # this run checks whether it generalizes to other scene types, not tandt itself.
     )
     return cmd, output_path
 
@@ -175,12 +165,14 @@ def main():
         for ds, sc in active_scenes
         for lmbda in LAMBDAS
     ]
-
     total = len(experiments)
 
     config = {
         "timestamp": TIMESTAMP,
         "lambdas": LAMBDAS,
+        "causal_knn_K": CAUSAL_KNN_K,
+        "quantize_mlp_fp16": True,
+        "use_reno": False,
         "active_scenes": [{"dataset": ds, "scene": sc} for ds, sc in active_scenes],
         "gpu_id": GPU_ID,
         "experiment_name": EXPERIMENT_NAME,
@@ -190,10 +182,10 @@ def main():
         json.dump(config, f, indent=2)
 
     print(f"\n{'='*80}")
-    print(f"Multi-Lambda Experiment Suite (Sequential Execution)")
+    print(f"Generalization Suite: causal_knn_K=8 + fp16 MLP, non-tandt datasets")
     print(f"{'='*80}")
     print(f"Experiment Directory: {EXPERIMENT_DIR}")
-    print(f"Lambdas: {LAMBDAS}")
+    print(f"Lambdas: {LAMBDAS} (high rate / low rate only)")
     print(f"Active scenes:")
     for ds, sc in active_scenes:
         print(f"  [{ds}] {sc}")
@@ -225,8 +217,6 @@ def main():
 
     print(f"Results summary: {EXPERIMENT_DIR}/results_summary.json")
     print(f"Total execution time: {summary['total_duration_minutes']:.2f} minutes\n")
-    print(f"To visualize results, run:")
-    print(f"  python plot_lambda_results.py {EXPERIMENT_DIR}")
 
 
 if __name__ == "__main__":
