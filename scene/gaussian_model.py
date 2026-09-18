@@ -1746,7 +1746,14 @@ class GaussianModel(nn.Module):
                     cur_remove_duplicates = (selected_grid_coords_unique.unsqueeze(1) == grid_coords[i*chunk_size:(i+1)*chunk_size, :]).all(-1).any(-1).view(-1)
                     remove_duplicates_list.append(cur_remove_duplicates)
 
-                remove_duplicates = reduce(torch.logical_or, remove_duplicates_list)
+                if remove_duplicates_list:
+                    remove_duplicates = reduce(torch.logical_or, remove_duplicates_list)
+                else:
+                    # grid_coords is empty (self.get_anchor has 0 anchors, e.g. every anchor was
+                    # pruned away) -- trivially nothing to deduplicate against, so every candidate
+                    # is new. reduce() has no identity element for an empty sequence and would
+                    # otherwise raise TypeError here.
+                    remove_duplicates = torch.zeros(selected_grid_coords_unique.shape[0], dtype=torch.bool, device='cuda')
             else:
                 remove_duplicates = (selected_grid_coords_unique.unsqueeze(1) == grid_coords).all(-1).any(-1).view(-1)
 
