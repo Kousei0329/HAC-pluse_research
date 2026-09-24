@@ -14,6 +14,8 @@
 #include <fstream>
 #include <algorithm>
 #include <numeric>
+#include <cstdlib>
+#include <string>
 #include <cuda.h>
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -448,23 +450,50 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
-	CHECK_CUDA(BACKWARD::render(
-		tile_grid,
-		block,
-		imgState.ranges,
-		binningState.point_list,
-		width, height,
-		background,
-		geomState.means2D,
-		geomState.conic_opacity,
-		color_ptr,
-		imgState.accum_alpha,
-		imgState.n_contrib,
-		dL_dpix,
-		(float3*)dL_dmean2D,
-		(float4*)dL_dconic,
-		dL_dopacity,
-		dL_dcolor), debug)
+	static const bool rasterizer_deterministic = [] {
+		const char* v = std::getenv("RASTERIZER_DETERMINISTIC");
+		return v != nullptr && std::string(v) == "1";
+	}();
+	if (rasterizer_deterministic)
+	{
+		CHECK_CUDA(BACKWARD::render_deterministic(
+			tile_grid,
+			block,
+			imgState.ranges,
+			binningState.point_list,
+			width, height,
+			background,
+			geomState.means2D,
+			geomState.conic_opacity,
+			color_ptr,
+			imgState.accum_alpha,
+			imgState.n_contrib,
+			dL_dpix,
+			(float3*)dL_dmean2D,
+			(float4*)dL_dconic,
+			dL_dopacity,
+			dL_dcolor), debug)
+	}
+	else
+	{
+		CHECK_CUDA(BACKWARD::render(
+			tile_grid,
+			block,
+			imgState.ranges,
+			binningState.point_list,
+			width, height,
+			background,
+			geomState.means2D,
+			geomState.conic_opacity,
+			color_ptr,
+			imgState.accum_alpha,
+			imgState.n_contrib,
+			dL_dpix,
+			(float3*)dL_dmean2D,
+			(float4*)dL_dconic,
+			dL_dopacity,
+			dL_dcolor), debug)
+	}
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,

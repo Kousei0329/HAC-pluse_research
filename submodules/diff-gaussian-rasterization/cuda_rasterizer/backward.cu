@@ -11,8 +11,16 @@
 
 #include "backward.h"
 #include "auxiliary.h"
+#include <cstdio>
+#include <cstdlib>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
+#include <cub/device/device_radix_sort.cuh>
+#include <cub/device/device_scan.cuh>
+#include <thrust/device_ptr.h>
+#include <thrust/copy.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/execution_policy.h>
 namespace cg = cooperative_groups;
 
 // Backward pass for conversion of spherical harmonics to RGB for
@@ -554,6 +562,418 @@ renderCUDA(
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic variant of renderCUDA.
+//
+// renderCUDA above accumulates gradients into per-Gaussian buffers
+// (dL_dcolors/dL_dmean2D/dL_dconic2D/dL_dopacity) via atomicAdd, because many
+// pixels (threads, possibly in different blocks) can contribute to the same
+// Gaussian. atomicAdd order depends on GPU thread scheduling, and float
+// addition is not associative for 3+ terms, so the summed gradient is not
+// bit-exact reproducible run to run even with a fixed seed.
+//
+// Fix (same pattern as utils/encodings.py's GRIDENCODER_DETERMINISTIC path):
+// every (pixel, Gaussian) contribution is written to a scratch buffer keyed
+// by (global_id, pix_id) instead of being atomicAdd'ed directly. An atomic
+// counter is used ONLY to pick a scratch slot (harmless -- it only affects
+// WHERE an entry lands, never its content or its key). Since a Gaussian
+// contributes to any given pixel at most once, (global_id, pix_id) keys are
+// guaranteed distinct, so sorting by key gives an unambiguous, scheduling-
+// independent order. Each Gaussian's contiguous run is then reduced by a
+// single thread doing a plain sequential loop -- no atomics, no cumsum
+// (unlike the gridencoder fix, we don't need cub's segmented reduce or a
+// float cumsum at all: a bare per-group sequential sum is already
+// deterministic and turned out simplest here).
+//
+// This runs in two passes because the exact number of surviving (pixel,
+// Gaussian) pairs isn't known ahead of time (it's much smaller than the
+// worst-case bound of num_rendered * BLOCK_SIZE, since most pixels stop
+// early once alpha-compositing saturates): pass 1 counts them exactly, pass
+// 2 allocates a scratch buffer of that exact size and fills it.
+// ---------------------------------------------------------------------------
+
+// Same traversal and math as renderCUDA, but the leaf action is either
+// "count this survivor" (COLLECT=false) or "write this survivor's packed
+// gradient payload to the scratch buffer" (COLLECT=true), instead of
+// atomicAdd-ing straight into the output buffers.
+template <uint32_t C, bool COLLECT>
+__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
+renderCUDA_deterministic(
+	const uint2* __restrict__ ranges,
+	const uint32_t* __restrict__ point_list,
+	int W, int H,
+	const float* __restrict__ bg_color,
+	const float2* __restrict__ points_xy_image,
+	const float4* __restrict__ conic_opacity,
+	const float* __restrict__ colors,
+	const float* __restrict__ final_Ts,
+	const uint32_t* __restrict__ n_contrib,
+	const float* __restrict__ dL_dpixels,
+	unsigned long long* __restrict__ out_counter,
+	int64_t* __restrict__ out_key,
+	float* __restrict__ out_val)
+{
+	auto block = cg::this_thread_block();
+	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	const uint32_t pix_id = W * pix.y + pix.x;
+	const float2 pixf = { (float)pix.x, (float)pix.y };
+
+	const bool inside = pix.x < W&& pix.y < H;
+	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
+
+	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
+
+	bool done = !inside;
+	int toDo = range.y - range.x;
+
+	__shared__ int collected_id[BLOCK_SIZE];
+	__shared__ float2 collected_xy[BLOCK_SIZE];
+	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_colors[C * BLOCK_SIZE];
+
+	const float T_final = inside ? final_Ts[pix_id] : 0;
+	float T = T_final;
+
+	uint32_t contributor = toDo;
+	const int last_contributor = inside ? n_contrib[pix_id] : 0;
+
+	float accum_rec[C] = { 0 };
+	float dL_dpixel[C];
+	if (inside)
+		for (int i = 0; i < C; i++)
+			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+
+	float last_alpha = 0;
+	float last_color[C] = { 0 };
+
+	const float ddelx_dx = 0.5 * W;
+	const float ddely_dy = 0.5 * H;
+
+	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
+	{
+		block.sync();
+		const int progress = i * BLOCK_SIZE + block.thread_rank();
+		if (range.x + progress < range.y)
+		{
+			const int coll_id = point_list[range.y - progress - 1];
+			collected_id[block.thread_rank()] = coll_id;
+			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
+			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			for (int i = 0; i < C; i++)
+				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
+		}
+		block.sync();
+
+		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
+		{
+			contributor--;
+			if (contributor >= last_contributor)
+				continue;
+
+			const float2 xy = collected_xy[j];
+			const float2 d = { xy.x - pixf.x, xy.y - pixf.y };
+			const float4 con_o = collected_conic_opacity[j];
+			const float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			if (power > 0.0f)
+				continue;
+
+			const float G = exp(power);
+			const float alpha = min(0.99f, con_o.w * G);
+			if (alpha < 1.0f / 255.0f)
+				continue;
+
+			T = T / (1.f - alpha);
+			const float dchannel_dcolor = alpha * T;
+
+			float dL_dalpha = 0.0f;
+			const int global_id = collected_id[j];
+			float payload[C + 6];
+			for (int ch = 0; ch < C; ch++)
+			{
+				const float c = collected_colors[ch * BLOCK_SIZE + j];
+				accum_rec[ch] = last_alpha * last_color[ch] + (1.f - last_alpha) * accum_rec[ch];
+				last_color[ch] = c;
+
+				const float dL_dchannel = dL_dpixel[ch];
+				dL_dalpha += (c - accum_rec[ch]) * dL_dchannel;
+				payload[ch] = dchannel_dcolor * dL_dchannel;
+			}
+			dL_dalpha *= T;
+			last_alpha = alpha;
+
+			float bg_dot_dpixel = 0;
+			for (int i = 0; i < C; i++)
+				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
+			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+
+			const float dL_dG = con_o.w * dL_dalpha;
+			const float gdx = G * d.x;
+			const float gdy = G * d.y;
+			const float dG_ddelx = -gdx * con_o.x - gdy * con_o.y;
+			const float dG_ddely = -gdy * con_o.z - gdx * con_o.y;
+
+			payload[C + 0] = dL_dG * dG_ddelx * ddelx_dx;      // dL_dmean2D.x
+			payload[C + 1] = dL_dG * dG_ddely * ddely_dy;      // dL_dmean2D.y
+			payload[C + 2] = -0.5f * gdx * d.x * dL_dG;        // dL_dconic2D.x
+			payload[C + 3] = -0.5f * gdx * d.y * dL_dG;        // dL_dconic2D.y
+			payload[C + 4] = -0.5f * gdy * d.y * dL_dG;        // dL_dconic2D.w
+			payload[C + 5] = G * dL_dalpha;                    // dL_dopacity
+
+			if (COLLECT)
+			{
+				const int64_t key = ((int64_t)global_id << 32) | (int64_t)pix_id;
+				unsigned long long slot = atomicAdd(out_counter, (unsigned long long)1);
+				out_key[slot] = key;
+				#pragma unroll
+				for (int c = 0; c < C + 6; c++)
+					out_val[slot * (C + 6) + c] = payload[c];
+			}
+			else
+			{
+				atomicAdd(out_counter, (unsigned long long)1);
+			}
+		}
+	}
+}
+
+// out_val_sorted[i] = out_val[perm[i]] (a plain gather -- each output slot
+// is written by exactly one thread, no races, fully deterministic).
+template <uint32_t C>
+__global__ void gather_payload_kernel(
+	const float* __restrict__ out_val,
+	const int* __restrict__ perm,
+	float* __restrict__ out_val_sorted,
+	unsigned long long N)
+{
+	unsigned long long i = blockIdx.x * (unsigned long long)blockDim.x + threadIdx.x;
+	if (i >= N) return;
+	int src = perm[i];
+	#pragma unroll
+	for (int c = 0; c < C + 6; c++)
+		out_val_sorted[i * (C + 6) + c] = out_val[(unsigned long long)src * (C + 6) + c];
+}
+
+// flag[i] = 1 iff entry i starts a new (distinct global_id) group. Purely
+// local comparisons on already globally-sorted keys -- no arithmetic
+// reduction, so no associativity/order concerns.
+__global__ void mark_group_starts_kernel(
+	const int64_t* __restrict__ sorted_keys,
+	int* __restrict__ flag,
+	unsigned long long N)
+{
+	unsigned long long i = blockIdx.x * (unsigned long long)blockDim.x + threadIdx.x;
+	if (i >= N) return;
+	if (i == 0)
+		flag[i] = 1;
+	else
+		flag[i] = ((sorted_keys[i] >> 32) != (sorted_keys[i - 1] >> 32)) ? 1 : 0;
+}
+
+// Each thread with flag[i]==1 owns a distinct group_index[i] (from the
+// preceding exclusive integer scan), so these writes never collide.
+__global__ void scatter_group_bounds_kernel(
+	const int64_t* __restrict__ sorted_keys,
+	const int* __restrict__ flag,
+	const int* __restrict__ group_index,
+	int* __restrict__ group_start,
+	int* __restrict__ group_gid,
+	unsigned long long N)
+{
+	unsigned long long i = blockIdx.x * (unsigned long long)blockDim.x + threadIdx.x;
+	if (i >= N) return;
+	if (flag[i])
+	{
+		int g = group_index[i];
+		group_start[g] = (int)i;
+		group_gid[g] = (int)(sorted_keys[i] >> 32);
+	}
+}
+
+// One thread per group: a plain sequential local sum over that group's
+// contiguous sorted range, then a single non-atomic write into the real
+// output buffers (safe because these buffers are zero-initialized by the
+// caller and this kernel is the ONLY writer of any given Gaussian's slot --
+// each global_id appears in at most one group).
+template <uint32_t C>
+__global__ void reduce_groups_kernel(
+	const float* __restrict__ sorted_vals,
+	const int* __restrict__ group_start,
+	const int* __restrict__ group_gid,
+	int num_groups,
+	unsigned long long N,
+	float3* __restrict__ dL_dmean2D,
+	float4* __restrict__ dL_dconic2D,
+	float* __restrict__ dL_dopacity,
+	float* __restrict__ dL_dcolors)
+{
+	int g = blockIdx.x * blockDim.x + threadIdx.x;
+	if (g >= num_groups) return;
+
+	unsigned long long start = (unsigned long long)group_start[g];
+	unsigned long long end = (g + 1 < num_groups) ? (unsigned long long)group_start[g + 1] : N;
+	int gid = group_gid[g];
+
+	float sum[C + 6] = { 0 };
+	for (unsigned long long i = start; i < end; i++)
+	{
+		#pragma unroll
+		for (int c = 0; c < C + 6; c++)
+			sum[c] += sorted_vals[i * (C + 6) + c];
+	}
+
+	for (int ch = 0; ch < C; ch++)
+		dL_dcolors[gid * C + ch] = sum[ch];
+	dL_dmean2D[gid].x = sum[C + 0];
+	dL_dmean2D[gid].y = sum[C + 1];
+	dL_dconic2D[gid].x = sum[C + 2];
+	dL_dconic2D[gid].y = sum[C + 3];
+	dL_dconic2D[gid].w = sum[C + 4];
+	dL_dopacity[gid] = sum[C + 5];
+}
+
+void BACKWARD::render_deterministic(
+	const dim3 grid, const dim3 block,
+	const uint2* ranges,
+	const uint32_t* point_list,
+	int W, int H,
+	const float* bg_color,
+	const float2* means2D,
+	const float4* conic_opacity,
+	const float* colors,
+	const float* final_Ts,
+	const uint32_t* n_contrib,
+	const float* dL_dpixels,
+	float3* dL_dmean2D,
+	float4* dL_dconic2D,
+	float* dL_dopacity,
+	float* dL_dcolors)
+{
+	constexpr uint32_t C = NUM_CHANNELS;
+
+	unsigned long long* d_counter;
+	cudaMalloc(&d_counter, sizeof(unsigned long long));
+	cudaMemset(d_counter, 0, sizeof(unsigned long long));
+
+	// Pass 1: count exactly how many (pixel, Gaussian) survivors there are.
+	renderCUDA_deterministic<C, false> << <grid, block >> > (
+		ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+		final_Ts, n_contrib, dL_dpixels, d_counter, nullptr, nullptr);
+
+	unsigned long long N = 0;
+	cudaMemcpy(&N, d_counter, sizeof(unsigned long long), cudaMemcpyDeviceToHost);
+
+	if (N == 0)
+	{
+		cudaFree(d_counter);
+		return;
+	}
+
+	int64_t* d_key;
+	float* d_val;
+	cudaMalloc(&d_key, N * sizeof(int64_t));
+	cudaMalloc(&d_val, N * (C + 6) * sizeof(float));
+	cudaMemset(d_counter, 0, sizeof(unsigned long long));
+
+	// Pass 2: collect every survivor's key + packed gradient payload.
+	renderCUDA_deterministic<C, true> << <grid, block >> > (
+		ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+		final_Ts, n_contrib, dL_dpixels, d_counter, d_key, d_val);
+
+	// Sort by key, carrying a permutation index (cub radix sort on the keys
+	// themselves is deterministic: it's a pure reordering of distinct keys,
+	// with no floating-point accumulation involved).
+	int* d_idx_in;
+	int* d_idx_out;
+	int64_t* d_key_sorted;
+	cudaMalloc(&d_idx_in, N * sizeof(int));
+	cudaMalloc(&d_idx_out, N * sizeof(int));
+	cudaMalloc(&d_key_sorted, N * sizeof(int64_t));
+
+	{
+		auto iter = thrust::make_counting_iterator<int>(0);
+		thrust::device_ptr<int> idx_ptr(d_idx_in);
+		thrust::copy(iter, iter + N, idx_ptr);
+	}
+
+	void* d_temp = nullptr;
+	size_t temp_bytes = 0;
+	cub::DeviceRadixSort::SortPairs(d_temp, temp_bytes, d_key, d_key_sorted, d_idx_in, d_idx_out, (int)N);
+	cudaMalloc(&d_temp, temp_bytes);
+	cub::DeviceRadixSort::SortPairs(d_temp, temp_bytes, d_key, d_key_sorted, d_idx_in, d_idx_out, (int)N);
+	cudaFree(d_temp);
+
+	float* d_val_sorted;
+	cudaMalloc(&d_val_sorted, N * (C + 6) * sizeof(float));
+	{
+		const int threads = 256;
+		const unsigned long long blocks = (N + threads - 1) / threads;
+		gather_payload_kernel<C> << <blocks, threads >> > (d_val, d_idx_out, d_val_sorted, N);
+	}
+
+	// Mark group starts, then an exact/associative INTEGER exclusive scan
+	// (safe -- only the analogous FLOAT cumsum was found to be
+	// non-deterministic on this CUDA/torch combination) to assign each
+	// entry its group index.
+	int* d_flag;
+	int* d_group_index;
+	cudaMalloc(&d_flag, N * sizeof(int));
+	cudaMalloc(&d_group_index, N * sizeof(int));
+	{
+		const int threads = 256;
+		const unsigned long long blocks = (N + threads - 1) / threads;
+		mark_group_starts_kernel << <blocks, threads >> > (d_key_sorted, d_flag, N);
+	}
+
+	void* d_temp2 = nullptr;
+	size_t temp_bytes2 = 0;
+	cub::DeviceScan::ExclusiveSum(d_temp2, temp_bytes2, d_flag, d_group_index, (int)N);
+	cudaMalloc(&d_temp2, temp_bytes2);
+	cub::DeviceScan::ExclusiveSum(d_temp2, temp_bytes2, d_flag, d_group_index, (int)N);
+	cudaFree(d_temp2);
+
+	int last_flag = 0, last_group_index = 0;
+	cudaMemcpy(&last_flag, d_flag + (N - 1), sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(&last_group_index, d_group_index + (N - 1), sizeof(int), cudaMemcpyDeviceToHost);
+	int num_groups = last_group_index + last_flag;
+
+	if (std::getenv("DEBUG_RASTERIZER_DETERMINISTIC"))
+		fprintf(stderr, "[render_deterministic] N=%llu num_groups=%d\n", N, num_groups);
+
+	int* d_group_start;
+	int* d_group_gid;
+	cudaMalloc(&d_group_start, num_groups * sizeof(int));
+	cudaMalloc(&d_group_gid, num_groups * sizeof(int));
+	{
+		const int threads = 256;
+		const unsigned long long blocks = (N + threads - 1) / threads;
+		scatter_group_bounds_kernel << <blocks, threads >> > (
+			d_key_sorted, d_flag, d_group_index, d_group_start, d_group_gid, N);
+	}
+
+	{
+		const int threads = 256;
+		const int blocks = (num_groups + threads - 1) / threads;
+		reduce_groups_kernel<C> << <blocks, threads >> > (
+			d_val_sorted, d_group_start, d_group_gid, num_groups, N,
+			dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
+	}
+
+	cudaFree(d_counter);
+	cudaFree(d_key);
+	cudaFree(d_val);
+	cudaFree(d_idx_in);
+	cudaFree(d_idx_out);
+	cudaFree(d_key_sorted);
+	cudaFree(d_val_sorted);
+	cudaFree(d_flag);
+	cudaFree(d_group_index);
+	cudaFree(d_group_start);
+	cudaFree(d_group_gid);
 }
 
 void BACKWARD::preprocess(
