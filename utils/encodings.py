@@ -39,6 +39,7 @@
 
 
 
+import os
 import torch
 import torch.nn as nn
 from torch.autograd import Function
@@ -53,6 +54,74 @@ anchor_round_digits = 16
 Q_anchor = 1/(2 ** anchor_round_digits - 1)
 use_clamp = True
 use_multiprocessor = False  # Always False plz. Not yet implemented for True.
+
+# GridEncoder's backward pass hashes many anchors into the same table bucket at coarse levels
+# (by design -- log2_hashmap_size caps the table size below resolution**num_dim), and sums their
+# gradient contributions with atomicAdd. Floating-point addition isn't associative for 3+-way
+# collisions, and atomicAdd's actual summation order depends on GPU thread scheduling, which
+# varies run to run even with the exact same seed -- this is a real, pre-existing source of
+# run-to-run non-determinism in the (unmodified, third-party) gridencoder CUDA kernel, not
+# something introduced by this project's own code. When this flag is on, grid_encode_backward_
+# collect() is used instead: every contribution is written to a scratch buffer keyed by
+# (address, deterministic tie-break derived only from which point/corner/channel produced it --
+# never from scheduling), then reduced on the sorted buffer in Python. Sorting on an array with no
+# duplicate keys has a unique, unambiguous result regardless of the underlying parallel sort's
+# implementation, so that stage is safe on GPU. The float summation itself, however, can't use
+# torch.cumsum on CUDA: measured directly (see the accompanying test script), torch 1.12.1's CUDA
+# cumsum is itself run-to-run non-deterministic for large arrays -- even torch.use_deterministic_
+# algorithms(True) doesn't fix it on this version -- so the running-sum step is done on CPU
+# instead (plain sequential accumulation, ~40ms for ~5M elements, which is a fine trade for a mode
+# whose whole point is trading speed for exactness). Only that one step needs the CPU round trip;
+# the group-boundary bookkeeping is done with an integer cumsum (exact, no rounding-order
+# ambiguity, safe on GPU). This trades a nontrivial amount of speed/memory for the determinism
+# guarantee, so it defaults to off.
+GRIDENCODER_DETERMINISTIC = os.environ.get('GRIDENCODER_DETERMINISTIC', '0') == '1'
+
+
+def _grid_encode_backward_deterministic(grad, inputs, embeddings, offsets_list, resolutions_list,
+                                         grad_embeddings, N, num_dim, n_features, n_levels, Rb,
+                                         dy_dx, grad_inputs, binary_vxl, min_level_id):
+    max_entries = int(N) * int(n_features) * int(n_levels) * (1 << int(num_dim))
+    device = embeddings.device
+    out_key = torch.empty(max_entries, dtype=torch.int64, device=device)
+    out_val = torch.empty(max_entries, dtype=embeddings.dtype, device=device)
+    out_counter = torch.zeros(1, dtype=torch.int32, device=device)
+
+    _backend.grid_encode_backward_collect(
+        grad, inputs, embeddings, offsets_list, resolutions_list,
+        N, num_dim, n_features, n_levels, Rb,
+        out_key, out_val, out_counter,
+        dy_dx, grad_inputs, binary_vxl, min_level_id,
+    )
+
+    count = int(out_counter.item())
+    if count == 0:
+        return
+    keys = out_key[:count]
+    vals = out_val[:count]
+
+    # All keys are distinct (address in the upper 32 bits, a deterministic per-contribution
+    # tie-break in the lower 32 bits) -- sorting an array with no duplicate keys has one
+    # unambiguous result, so this order is identical on every run regardless of which GPU thread
+    # happened to grab which scratch slot.
+    order = torch.argsort(keys)
+    sorted_keys = keys[order]
+    sorted_vals = vals[order].double()
+    addrs = sorted_keys >> 32
+
+    # Segment-sum via cumsum: the running total through the end of each same-address run, minus
+    # the running total through the end of the previous run, is exactly that run's sum. The
+    # value cumsum runs on CPU (see the module-level comment on GRIDENCODER_DETERMINISTIC for
+    # why); counts' cumsum is over integers, so it's exact or associativity issues, and stays on
+    # GPU.
+    cum = torch.cumsum(sorted_vals.cpu(), dim=0).to(device)
+    unique_addrs, counts = torch.unique_consecutive(addrs, return_counts=True)
+    end_idx = torch.cumsum(counts, dim=0) - 1
+    run_end = cum[end_idx]
+    run_start = torch.cat([torch.zeros(1, dtype=run_end.dtype, device=device), run_end[:-1]])
+    group_sum = (run_end - run_start).to(grad_embeddings.dtype)
+
+    grad_embeddings.view(-1).index_copy_(0, unique_addrs, group_sum)
 
 def get_binary_vxl_size(binary_vxl):
     # binary_vxl: {0, 1}
@@ -226,20 +295,22 @@ class _grid_encode(Function):
         else:
             grad_inputs = None
 
+        backward_fn = _grid_encode_backward_deterministic if GRIDENCODER_DETERMINISTIC else None
+
         if isinstance(min_level_id, int):
-            _backend.grid_encode_backward(
-                grad,
-                inputs,
-                embeddings,
-                # embeddings_mask,
-                offsets_list[min_level_id:max_level_id+1],
-                resolutions_list[min_level_id:max_level_id],
-                grad_embeddings,
-                N, num_dim, n_features, n_levels_calc, 0, Rb,
-                dy_dx,
-                grad_inputs,
-                binary_vxl,
-                None
+            _offsets = offsets_list[min_level_id:max_level_id+1]
+            _resolutions = resolutions_list[min_level_id:max_level_id]
+            _min_level_id = None
+        else:
+            _offsets = offsets_list
+            _resolutions = resolutions_list
+            _min_level_id = min_level_id
+
+        if backward_fn is not None:
+            backward_fn(
+                grad, inputs, embeddings, _offsets, _resolutions, grad_embeddings,
+                N, num_dim, n_features, n_levels_calc, Rb,
+                dy_dx, grad_inputs, binary_vxl, _min_level_id,
                 )
         else:
             _backend.grid_encode_backward(
@@ -247,14 +318,14 @@ class _grid_encode(Function):
                 inputs,
                 embeddings,
                 # embeddings_mask,
-                offsets_list,
-                resolutions_list,
+                _offsets,
+                _resolutions,
                 grad_embeddings,
                 N, num_dim, n_features, n_levels_calc, 0, Rb,
                 dy_dx,
                 grad_inputs,
                 binary_vxl,
-                min_level_id
+                _min_level_id
                 )
 
         if dy_dx is not None:

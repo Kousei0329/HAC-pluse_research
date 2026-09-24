@@ -5,6 +5,7 @@
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("grid_encode_forward", &grid_encode_forward, "grid_encode_forward (CUDA)");
     m.def("grid_encode_backward", &grid_encode_backward, "grid_encode_backward (CUDA)");
+    m.def("grid_encode_backward_collect", &grid_encode_backward_collect, "grid_encode_backward_collect (CUDA, deterministic)");
     m.def("grid_encode_mix2D_forward", &grid_encode_mix2D_forward, "grid_encode_mix2D_forward (CUDA)");
     m.def("grid_encode_mix2D_backward", &grid_encode_mix2D_backward, "grid_encode_mix2D_backward (CUDA)");
     m.def("avg_2D_forward", &avg_2D_forward, "avg_2D_forward (CUDA)");

@@ -410,7 +410,7 @@ class CausalKNNContext(nn.Module):
     - 学習可能温度: log_temperature パラメータで距離重みを適応的に調整
     """
     def __init__(self, hash_dim: int, K: int = 16, temperature: float = 1.0,
-                 max_lookback: int = 3000):
+                 max_lookback: int = 3000, hidden_mult: int = 8):
         super().__init__()
         self.K = K
         self.max_lookback = max_lookback
@@ -419,15 +419,21 @@ class CausalKNNContext(nn.Module):
             torch.tensor(math.log(temperature), dtype=torch.float32))
         # hash_feats を正規化してから correction を計算（学習安定化）
         self.norm = nn.LayerNorm(hash_dim)
-        # 残差補正: 3層 + LayerNorm + GELU で高い表現力を確保(2x幅、+1層)
+        # 残差補正: 3層 + LayerNorm + GELU で高い表現力を確保。hidden_mult(既定8, 2x幅+1層相当)は
+        # このネットワーク自体のパラメータ数(=送信が必要なサイズ)を直接支配するので、
+        # get_mlp_size()がcausal_knnを正しく計上するようになった後は、baseline相当のサイズに
+        # 抑えたい場合はここを2〜4に下げるのが効果的(モデル容量とサイズのトレードオフ)。
+        assert hidden_mult % 2 == 0, "hidden_mult must be even (GEGLUAct halves it between layers)"
+        h = hash_dim * hidden_mult
+        h_half = hash_dim * (hidden_mult // 2)
         self.correction = nn.Sequential(
-            nn.Linear(hash_dim * 2, hash_dim * 8),
-            nn.LayerNorm(hash_dim * 8),
+            nn.Linear(hash_dim * 2, h),
+            nn.LayerNorm(h),
             GEGLUAct(),
-            nn.Linear(hash_dim * 4, hash_dim * 8),
-            nn.LayerNorm(hash_dim * 8),
+            nn.Linear(h_half, h),
+            nn.LayerNorm(h),
             GEGLUAct(),
-            nn.Linear(hash_dim * 4, hash_dim),
+            nn.Linear(h_half, hash_dim),
         )
 
     def _get_temp(self) -> torch.Tensor:
@@ -625,6 +631,8 @@ class GaussianModel(nn.Module):
                  use_anchor_cond_norm: bool=False,
                  use_causal_knn: bool=False,
                  causal_knn_K: int=16,
+                 causal_knn_hidden_mult: int=8,
+                 mlp_grid_hidden_mult: int=8,
                  use_3gmm: bool=False,
                  use_reno: bool=False,
                  reno_ckpt_path: str=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -755,15 +763,20 @@ class GaussianModel(nn.Module):
 
         # Entropy-prediction MLP: widened (2x hidden width) and deepened (+1 hidden layer)
         # relative to the original 2-hidden-layer design, so it has more capacity to exploit
-        # the causal_knn / anchor_cond_norm context that feeds it.
+        # the causal_knn / anchor_cond_norm context that feeds it. mlp_grid_hidden_mult
+        # (default 8 = the widened design) directly controls this network's own parameter
+        # count/transmitted size -- lower it (e.g. 4) to trade capacity for a smaller MLPs size.
+        assert mlp_grid_hidden_mult % 2 == 0, "mlp_grid_hidden_mult must be even (GEGLUAct halves it between layers)"
+        g_h = feat_dim * mlp_grid_hidden_mult
+        g_h_half = feat_dim * (mlp_grid_hidden_mult // 2)
         self.mlp_grid = nn.Sequential(
-            nn.Linear(self.encoding_xyz.output_dim, feat_dim*8),
+            nn.Linear(self.encoding_xyz.output_dim, g_h),
             GEGLUAct(),
-            nn.Linear(feat_dim*4, feat_dim*8),
+            nn.Linear(g_h_half, g_h),
             GEGLUAct(),
-            nn.Linear(feat_dim*4, feat_dim*8),
+            nn.Linear(g_h_half, g_h),
             GEGLUAct(),
-            nn.Linear(feat_dim*4, (feat_dim+6+3*self.n_offsets)*2+feat_dim+1+1+1),
+            nn.Linear(g_h_half, (feat_dim+6+3*self.n_offsets)*2+feat_dim+1+1+1),
         ).cuda()
 
         if not is_synthetic_nerf:
@@ -786,8 +799,17 @@ class GaussianModel(nn.Module):
                 hash_dim=self.encoding_xyz.output_dim,
                 K=causal_knn_K,
                 temperature=1.0,
+                hidden_mult=causal_knn_hidden_mult,
                 max_lookback=3000,
             ).cuda()
+
+        import os as _os
+        if _os.environ.get('HAC_DEBUG_PARAM_COUNTS'):
+            print(f"[DEBUG_PARAM_COUNTS] encoding_xyz.output_dim={self.encoding_xyz.output_dim}")
+            print(f"[DEBUG_PARAM_COUNTS] mlp_grid params={sum(p.numel() for p in self.mlp_grid.parameters())}")
+            print(f"[DEBUG_PARAM_COUNTS] mlp_deform params={sum(p.numel() for p in self.mlp_deform.parameters())}")
+            if use_causal_knn:
+                print(f"[DEBUG_PARAM_COUNTS] causal_knn params={sum(p.numel() for p in self.causal_knn.parameters())}")
 
         self.entropy_gaussian = Entropy_gaussian(Q=1).cuda()
         self.EG_mix_prob_2 = Entropy_gaussian_mix_prob_2(Q=1).cuda()
@@ -811,22 +833,38 @@ class GaussianModel(nn.Module):
         mlp_size = 0
         quant_bits = getattr(self, '_mlp_quant_bits', None)
         is_fp16 = getattr(self, '_mlp_fp16', False)
+        is_fp8 = getattr(self, '_mlp_fp8', False)
         for n, p in self.named_parameters():
-            if 'mlp' in n:
-                # Only mlp_grid/mlp_deform (the entropy-prediction MLPs) are ever fake-quantized
-                # by quantize_mlps_()/quantize_mlps_fp16_(); everything else (mlp_opacity/cov/
-                # color) stays at the full `digit` (fp32) width.
-                if is_fp16 and ('mlp_grid' in n or 'mlp_deform' in n):
-                    # True IEEE half precision: no extra scale metadata needed, unlike the linear
-                    # int quantization below, so it's a flat 16 bits/param (weights and biases).
-                    mlp_size += p.numel()*16
-                elif quant_bits is not None and p.dim() >= 2 and ('mlp_grid' in n or 'mlp_deform' in n):
-                    mlp_size += p.numel()*quant_bits
-                    # Per-output-channel scale overhead (fp16 per row) -- quantize_mlps_ uses one
-                    # scale per out_feature row, not one per tensor, so this has to be counted too.
-                    mlp_size += p.shape[0]*16
-                else:
-                    mlp_size += p.numel()*digit
+            # causal_knn's weights are side info a real decoder needs too (it's not named with
+            # 'mlp' so it was previously skipped by this loop entirely -- silently free in every
+            # size report). Count it alongside mlp_grid/mlp_deform as an entropy-side-info module.
+            is_causal_knn = n.startswith('causal_knn.')
+            if not ('mlp' in n or is_causal_knn):
+                continue
+            # Only mlp_grid/mlp_deform/causal_knn (the entropy-prediction side info) are ever
+            # fake-quantized by quantize_mlps_()/quantize_mlps_fp16_()/quantize_mlps_fp8_();
+            # everything else (mlp_opacity/cov/color/featurebank/hyp) stays at the full `digit`
+            # (fp32) width.
+            # fp16/fp8 round-trip causal_knn too (see _entropy_side_info_modules), but the
+            # int-quant path (quantize_mlps_) only ever touches mlp_grid/mlp_deform -- keep its
+            # target set narrower so this doesn't under-report causal_knn as quantized when it
+            # was actually left at fp32.
+            is_fp_quant_target = is_causal_knn or 'mlp_grid' in n or 'mlp_deform' in n
+            is_int_quant_target = 'mlp_grid' in n or 'mlp_deform' in n
+            if is_fp8 and is_fp_quant_target:
+                # True 8-bit float (e4m3/e5m2): no extra scale metadata needed, flat 8 bits/param.
+                mlp_size += p.numel()*8
+            elif is_fp16 and is_fp_quant_target:
+                # True IEEE half precision: no extra scale metadata needed, unlike the linear
+                # int quantization below, so it's a flat 16 bits/param (weights and biases).
+                mlp_size += p.numel()*16
+            elif quant_bits is not None and p.dim() >= 2 and is_int_quant_target:
+                mlp_size += p.numel()*quant_bits
+                # Per-output-channel scale overhead (fp16 per row) -- quantize_mlps_ uses one
+                # scale per out_feature row, not one per tensor, so this has to be counted too.
+                mlp_size += p.shape[0]*16
+            else:
+                mlp_size += p.numel()*digit
         return mlp_size, mlp_size / 8 / 1024 / 1024
 
     def structured_prune_mlps_(self, ratio=0.3):
@@ -1094,20 +1132,78 @@ class GaussianModel(nn.Module):
                         n_tensors += 1
         print(f"[quantize_mlps_] fake-quantized {n_tensors} weight matrices in mlp_grid/mlp_deform to {bits} bits (per-output-channel scale)")
 
+    def _entropy_side_info_modules(self):
+        """mlp_grid/mlp_deform plus causal_knn (when enabled) -- every network whose weights are
+        side information the decoder needs and that quantize_mlps_fp16_/quantize_mlps_fp8_ compress.
+        causal_knn's own parameters were previously never counted by get_mlp_size() at all (its
+        submodule names don't contain 'mlp'), so its weights were silently free in every size
+        report; they're included here and in get_mlp_size()'s name matching so the reported Total
+        actually reflects what a real decoder would need to receive.
+        """
+        mods = [self.mlp_grid, self.mlp_deform]
+        if getattr(self, 'use_causal_knn', False) and hasattr(self, 'causal_knn'):
+            mods.append(self.causal_knn)
+        return mods
+
     def quantize_mlps_fp16_(self):
-        """Post-training round-trips mlp_grid's and mlp_deform's parameters (weights and biases)
-        through true IEEE half precision (torch.float16) in place, simulating real fp16 storage.
-        Unlike quantize_mlps_ (linear int quantization needing a per-row scale), fp16 needs no
-        extra metadata -- get_mlp_size() charges a flat 16 bits/param via self._mlp_fp16.
+        """Post-training round-trips mlp_grid's, mlp_deform's, and (if enabled) causal_knn's
+        parameters (weights and biases) through true IEEE half precision (torch.float16) in
+        place, simulating real fp16 storage. Unlike quantize_mlps_ (linear int quantization
+        needing a per-row scale), fp16 needs no extra metadata -- get_mlp_size() charges a flat
+        16 bits/param via self._mlp_fp16.
         """
         self._mlp_fp16 = True
         n_tensors = 0
         with torch.no_grad():
-            for m in [self.mlp_grid, self.mlp_deform]:
+            for m in self._entropy_side_info_modules():
                 for name, p in m.named_parameters():
                     p.copy_(p.half().float())
                     n_tensors += 1
-        print(f"[quantize_mlps_fp16_] round-tripped {n_tensors} tensors in mlp_grid/mlp_deform through fp16")
+        print(f"[quantize_mlps_fp16_] round-tripped {n_tensors} tensors through fp16 "
+              f"({', '.join(type(m).__name__ for m in self._entropy_side_info_modules())})")
+
+    @staticmethod
+    def _round_to_minifloat(x, exp_bits, mant_bits, bias):
+        """Rounds x to the nearest value representable by a minifloat format with `exp_bits`
+        exponent bits, `mant_bits` mantissa bits, and the given exponent bias (no subnormals/
+        Inf/NaN handling -- irrelevant for finite, non-extreme network weights). Implemented with
+        plain tensor ops (no torch.float8_e4m3fn/e5m2 dtype) because the project's training env
+        (HAC_plux_env, torch 1.12.1) predates PyTorch's native fp8 dtypes entirely; this reproduces
+        the same round-to-nearest-representable-value semantics on any torch version.
+        """
+        sign = torch.sign(x)
+        absx_safe = torch.clamp(x.abs(), min=1e-30)
+        exponent = torch.floor(torch.log2(absx_safe))
+        max_exp = 2 ** exp_bits - 1 - bias
+        min_exp = -bias + 1
+        exponent = torch.clamp(exponent, min=min_exp, max=max_exp)
+        scale = torch.pow(2.0, exponent)
+        mantissa = absx_safe / scale  # in [1, 2)
+        step = 2.0 ** (-mant_bits)
+        q_mantissa = torch.round((mantissa - 1.0) / step) * step + 1.0
+        overflow = q_mantissa >= 2.0  # rounding pushed the mantissa up to the next exponent
+        q_mantissa = torch.where(overflow, torch.ones_like(q_mantissa), q_mantissa)
+        exponent = torch.where(overflow, exponent + 1, exponent)
+        result = sign * q_mantissa * torch.pow(2.0, exponent)
+        return torch.where(x.abs() == 0, torch.zeros_like(x), result)
+
+    def quantize_mlps_fp8_(self, fp8_variant='e4m3'):
+        """Post-training round-trips mlp_grid's, mlp_deform's, and (if enabled) causal_knn's
+        parameters through an 8-bit float representation -- e4m3 (1 sign + 4 exponent + 3
+        mantissa bits, bias 7) or e5m2 (1 sign + 5 exponent + 2 mantissa bits, bias 15) -- the
+        same round-trip-in-place technique as quantize_mlps_fp16_ but at half the bit width.
+        get_mlp_size() charges a flat 8 bits/param via self._mlp_fp8.
+        """
+        exp_bits, mant_bits, bias = (4, 3, 7) if fp8_variant == 'e4m3' else (5, 2, 15)
+        self._mlp_fp8 = True
+        n_tensors = 0
+        with torch.no_grad():
+            for m in self._entropy_side_info_modules():
+                for name, p in m.named_parameters():
+                    p.copy_(self._round_to_minifloat(p, exp_bits, mant_bits, bias))
+                    n_tensors += 1
+        print(f"[quantize_mlps_fp8_] round-tripped {n_tensors} tensors through {fp8_variant} "
+              f"({', '.join(type(m).__name__ for m in self._entropy_side_info_modules())})")
 
     def eval(self):
         self.mlp_opacity.eval()

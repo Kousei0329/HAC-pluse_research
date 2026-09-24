@@ -853,6 +853,201 @@ __global__ void kernel_grid_backward(
 }
 
 
+// Deterministic variant of kernel_grid_backward: identical per-thread math (w_list/index_list/wn),
+// but instead of atomicAdd-ing straight into grad_grid (whose final value then depends on the
+// GPU's non-deterministic thread scheduling whenever >1 point/corner collide on the same hash
+// bucket -- multiple summands landing in different orders across runs, and float addition isn't
+// associative for 3+ way collisions), every contribution is appended to a scratch buffer instead.
+// Each entry's key packs (global flat address into grad_embeddings) in the upper 32 bits and a
+// value derived purely from (point b, corner idx, channel c) -- never from thread-scheduling --
+// in the lower 32 bits. Sorting by this 64-bit key on the host side then yields a bit-for-bit
+// reproducible order for every run (no two entries ever share a key, so no tie-breaking
+// ambiguity), and summing the sorted, same-address runs deterministically reproduces the same
+// float rounding every time. The atomic op here only hands out a unique scratch slot -- it never
+// touches the actual gradient value, so its own non-determinism is harmless.
+template <typename scalar_t, uint32_t num_dim, uint32_t n_fearures, uint32_t n_features_per_thread>
+__global__ void kernel_grid_backward_collect(
+    const scalar_t * __restrict__ grad,
+    const float * __restrict__ inputs,
+    const scalar_t * __restrict__ grid,
+    const int * __restrict__ offsets_list,
+    const int * __restrict__ resolutions_list,
+    const uint32_t N, const uint32_t n_levels, const uint32_t Rb,
+    const bool * __restrict__ binary_vxl,
+    const int * __restrict__ min_level_id,
+    int64_t * __restrict__ out_key,
+    scalar_t * __restrict__ out_val,
+    unsigned int * __restrict__ out_counter
+    ) {
+    const uint32_t b = (blockIdx.x * blockDim.x + threadIdx.x) * n_features_per_thread / n_fearures;
+    if (b >= N) return;
+
+    uint32_t level = 0;
+    if (min_level_id) {
+        level = min_level_id[b] + blockIdx.y;
+    }
+    else {
+        level = blockIdx.y;
+    }
+
+    const uint32_t ch = (blockIdx.x * blockDim.x + threadIdx.x) * n_features_per_thread - b * n_fearures;
+
+    const scalar_t * __restrict__ grad_grid_unused = grid; // silence unused-param warnings when not indexed below
+    (void)grad_grid_unused;
+
+    const float * inputs_local = inputs + b * num_dim;
+    const scalar_t * grad_local = grad + blockIdx.y * N * n_fearures + b * n_fearures + ch;
+
+    const uint32_t hashmap_size = offsets_list[level + 1] - offsets_list[level];
+    const uint32_t resolution = (uint32_t)resolutions_list[level];
+
+    #pragma unroll
+    for (uint32_t d = 0; d < num_dim; d++) {
+        if (inputs_local[d] < 0 || inputs_local[d] > 1) {
+            return;
+        }
+    }
+
+    float pos[num_dim];
+    uint32_t pos_grid[num_dim];
+
+    #pragma unroll
+    for (uint32_t d = 0; d < num_dim; d++) {
+        pos[d] = inputs_local[d] * float(resolution - 2) + 0.5;
+        pos_grid[d] = (uint32_t)floorf(pos[d]);
+        pos[d] -= (float)pos_grid[d];
+    }
+
+    scalar_t grad_cur[n_features_per_thread] = {0};
+    #pragma unroll
+    for (uint32_t c = 0; c < n_features_per_thread; c++) {
+        grad_cur[c] = grad_local[c];
+    }
+
+    float w_list[1 << num_dim] = {0};
+    bool m_list[1 << num_dim] = {true};
+    uint32_t zero_flag_list[1 << num_dim] = {0};
+    uint32_t index_list[1 << num_dim] = {0};
+    float wn = 0;
+
+    #pragma unroll
+    for (uint32_t idx = 0; idx < (1 << num_dim); idx++) {
+        float w = 1;
+        uint32_t pos_grid_local[num_dim];
+
+        #pragma unroll
+        for (uint32_t d = 0; d < num_dim; d++) {
+            if ((idx & (1 << d)) == 0) {
+                w *= 1 - pos[d];
+                pos_grid_local[d] = pos_grid[d];
+            } else {
+                w *= pos[d];
+                pos_grid_local[d] = min(pos_grid[d] + 1, resolution - 1);
+            }
+        }
+
+        uint32_t zero_flag = 0;
+        #pragma unroll
+        for (uint32_t d = 0; d < num_dim; d++) {
+            if (pos_grid_local[d]==0 || pos_grid_local[d]==resolution-1) {
+                zero_flag = 1;
+                break;
+            }
+        }
+
+        bool m = true;
+        if (binary_vxl){
+            m = false;
+            float scale_re = 1.0 / (float(resolution) - 2.0);
+            uint32_t pos_g[num_dim*2];
+            #pragma unroll
+            for (uint32_t d = 0; d < num_dim; d++) {
+                float points_n = (float(pos_grid_local[d]) - 0.5) * scale_re;
+
+                float pos_g1 = points_n - scale_re;
+                pos_g1 = pos_g1 * Rb;
+                pos_g1 = pos_g1 < 0? 0:pos_g1;
+                pos_g1 = pos_g1 > Rb-1? Rb-1:pos_g1;
+                pos_g[d] = int(pos_g1);
+
+                float pos_g2 = points_n + scale_re;
+                pos_g2 = pos_g2 * Rb;
+                pos_g2 = pos_g2 < 0? 0:pos_g2;
+                pos_g2 = pos_g2 > Rb-1? Rb-1:pos_g2;
+                pos_g[num_dim + d] = int(pos_g2);
+            }
+
+            if (num_dim == 1) {
+                #pragma unroll
+                for (int idx_a=pos_g[0]; idx_a<=pos_g[1]; idx_a++){
+                    m = m | (binary_vxl[idx_a]);
+                    if (m == true) break;
+                }
+            }
+            if (num_dim == 2) {
+                #pragma unroll
+                for (int idx_a=pos_g[0]; idx_a<=pos_g[2]; idx_a++){
+                    #pragma unroll
+                    for (int idx_b=pos_g[1]; idx_b<=pos_g[3]; idx_b++){
+                        m = m | (binary_vxl[idx_a*Rb+idx_b]);
+                        if (m == true) break;
+                    }
+                    if (m == true) break;
+                }
+            }
+            if (num_dim == 3) {
+                #pragma unroll
+                for (int idx_a=pos_g[0]; idx_a<=pos_g[3]; idx_a++){
+                    #pragma unroll
+                    for (int idx_b=pos_g[1]; idx_b<=pos_g[4]; idx_b++){
+                        #pragma unroll
+                        for (int idx_c=pos_g[2]; idx_c<=pos_g[5]; idx_c++){
+                            m = m | (binary_vxl[idx_a*Rb*Rb+idx_b*Rb+idx_c]);
+                            if (m == true) break;
+                        }
+                        if (m == true) break;
+                    }
+                    if (m == true) break;
+                }
+            }
+        }
+
+        w_list[idx] = w;
+        m_list[idx] = m;
+        zero_flag_list[idx] = zero_flag;
+        if (zero_flag == 0 && m == true){
+            uint32_t index = get_grid_index<num_dim, n_fearures>(0, ch, hashmap_size, resolution, pos_grid_local);
+            index_list[idx] = index;
+            wn += w;
+        }
+    }
+
+    if (wn == 0) {
+        wn += 1e-9;
+    }
+    float wn_re = 1.0 / wn;
+
+    const int64_t level_base = (int64_t)offsets_list[level] * n_fearures;
+
+    #pragma unroll
+    for (uint32_t idx = 0; idx < (1 << num_dim); idx++) {
+        if (zero_flag_list[idx] == 0 && m_list[idx] == true) {
+            #pragma unroll
+            for (uint32_t c = 0; c < n_features_per_thread; c++) {
+                scalar_t value = w_list[idx] * wn_re * grad_cur[c];
+                int64_t addr = level_base + (int64_t)index_list[idx] + c;
+                // Deterministic tie-break: a pure function of (point, corner, channel) --
+                // globally unique per contribution, independent of GPU scheduling.
+                int64_t tie = (((int64_t)b * (1 << num_dim) + idx) * n_features_per_thread + c);
+                unsigned int slot = atomicAdd(out_counter, 1u);
+                out_key[slot] = (addr << 32) | (tie & 0xffffffffLL);
+                out_val[slot] = value;
+            }
+        }
+    }
+}
+
+
 template <typename scalar_t, uint32_t num_dim, uint32_t n_fearures>
 __global__ void kernel_input_backward(
     const scalar_t * __restrict__ grad,
@@ -1016,6 +1211,78 @@ void grid_encode_backward_cuda(
 }
 
 
+template <typename scalar_t, uint32_t num_dim>
+void kernel_grid_backward_collect_wrapper(
+    const scalar_t *grad,
+    const float *inputs,
+    const scalar_t *embeddings,
+    const int *offsets_list,
+    const int *resolutions_list,
+    const uint32_t N, const uint32_t n_fearures, const uint32_t n_levels, const uint32_t Rb,
+    scalar_t *dy_dx,
+    scalar_t *grad_inputs,
+    const bool *binary_vxl,
+    const int *min_level_id,
+    int64_t *out_key,
+    scalar_t *out_val,
+    unsigned int *out_counter
+    ) {
+    static constexpr uint32_t N_THREAD = 256;
+    const uint32_t n_features_per_thread = std::min(2u, n_fearures);
+    const dim3 blocks_hashgrid = { div_round_up(N * n_fearures / n_features_per_thread, N_THREAD), n_levels, 1 };
+    switch (n_fearures) {
+        case 1:
+            kernel_grid_backward_collect<scalar_t, num_dim, 1, 1><<<blocks_hashgrid, N_THREAD>>>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_levels, Rb, binary_vxl, min_level_id, out_key, out_val, out_counter);
+            if (dy_dx) kernel_input_backward<scalar_t, num_dim, 1><<<div_round_up(N * num_dim, N_THREAD), N_THREAD>>>(grad, dy_dx, grad_inputs, N, n_levels);
+            break;
+        case 2:
+            kernel_grid_backward_collect<scalar_t, num_dim, 2, 2><<<blocks_hashgrid, N_THREAD>>>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_levels, Rb, binary_vxl, min_level_id, out_key, out_val, out_counter);
+            if (dy_dx) kernel_input_backward<scalar_t, num_dim, 2><<<div_round_up(N * num_dim, N_THREAD), N_THREAD>>>(grad, dy_dx, grad_inputs, N, n_levels);
+            break;
+        case 4:
+            kernel_grid_backward_collect<scalar_t, num_dim, 4, 2><<<blocks_hashgrid, N_THREAD>>>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_levels, Rb, binary_vxl, min_level_id, out_key, out_val, out_counter);
+            if (dy_dx) kernel_input_backward<scalar_t, num_dim, 4><<<div_round_up(N * num_dim, N_THREAD), N_THREAD>>>(grad, dy_dx, grad_inputs, N, n_levels);
+            break;
+        case 8:
+            kernel_grid_backward_collect<scalar_t, num_dim, 8, 2><<<blocks_hashgrid, N_THREAD>>>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_levels, Rb, binary_vxl, min_level_id, out_key, out_val, out_counter);
+            if (dy_dx) kernel_input_backward<scalar_t, num_dim, 8><<<div_round_up(N * num_dim, N_THREAD), N_THREAD>>>(grad, dy_dx, grad_inputs, N, n_levels);
+            break;
+        case 16:
+            kernel_grid_backward_collect<scalar_t, num_dim, 16, 2><<<blocks_hashgrid, N_THREAD>>>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_levels, Rb, binary_vxl, min_level_id, out_key, out_val, out_counter);
+            if (dy_dx) kernel_input_backward<scalar_t, num_dim, 16><<<div_round_up(N * num_dim, N_THREAD), N_THREAD>>>(grad, dy_dx, grad_inputs, N, n_levels);
+            break;
+        case 32:
+            kernel_grid_backward_collect<scalar_t, num_dim, 32, 2><<<blocks_hashgrid, N_THREAD>>>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_levels, Rb, binary_vxl, min_level_id, out_key, out_val, out_counter);
+            if (dy_dx) kernel_input_backward<scalar_t, num_dim, 32><<<div_round_up(N * num_dim, N_THREAD), N_THREAD>>>(grad, dy_dx, grad_inputs, N, n_levels);
+            break;
+        default: throw std::runtime_error{"GridEncoding: n_fearures must be 1, 2, 4, 8, 16 or 32."};
+    }
+}
+
+template <typename scalar_t>
+void grid_encode_backward_collect_cuda(
+    const scalar_t *grad,
+    const float *inputs,
+    const scalar_t *embeddings,
+    const int *offsets_list,
+    const int *resolutions_list,
+    const uint32_t N, const uint32_t num_dim, const uint32_t n_fearures, const uint32_t n_levels, const uint32_t Rb,
+    scalar_t *dy_dx,
+    scalar_t *grad_inputs,
+    const bool *binary_vxl,
+    const int *min_level_id,
+    int64_t *out_key,
+    scalar_t *out_val,
+    unsigned int *out_counter
+    ) {
+    switch (num_dim) {
+        case 1: kernel_grid_backward_collect_wrapper<scalar_t, 1>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_fearures, n_levels, Rb, dy_dx, grad_inputs, binary_vxl, min_level_id, out_key, out_val, out_counter); break;
+        case 2: kernel_grid_backward_collect_wrapper<scalar_t, 2>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_fearures, n_levels, Rb, dy_dx, grad_inputs, binary_vxl, min_level_id, out_key, out_val, out_counter); break;
+        case 3: kernel_grid_backward_collect_wrapper<scalar_t, 3>(grad, inputs, embeddings, offsets_list, resolutions_list, N, n_fearures, n_levels, Rb, dy_dx, grad_inputs, binary_vxl, min_level_id, out_key, out_val, out_counter); break;
+        default: throw std::runtime_error{"GridEncoding: num_dim must be 1, 2, 3."};
+    }
+}
+
 
 void grid_encode_forward(
     const at::Tensor inputs,
@@ -1128,6 +1395,73 @@ void grid_encode_backward(
             grad_inputs.has_value() ? grad_inputs.value().data_ptr<scalar_t>() : nullptr,
             binary_vxl.has_value() ? binary_vxl.value().data_ptr<bool>() : nullptr,
             min_level_id.has_value() ? min_level_id.value().data_ptr<int>() : nullptr
+            );
+    }));
+
+}
+
+// Deterministic collection pass: instead of accumulating gradients into grad_embeddings directly
+// (kernel_grid_backward's atomicAdd, whose result is run-to-run non-deterministic whenever
+// several points'/corners' contributions collide on the same hash bucket), every contribution is
+// written out as a (key, value) pair -- out_key/out_val/out_counter must be pre-allocated by the
+// caller (see grid.py) with out_key/out_val sized to at least N * n_fearures * n_levels *
+// (1 << num_dim) and out_counter a single zeroed uint32 tensor. The caller is expected to sort by
+// out_key (all distinct, so the sort order is unambiguous) and deterministically reduce same-
+// address runs afterward -- see the Python-side comment in grid.py for why this reproduces the
+// same result on every run.
+void grid_encode_backward_collect(
+    const at::Tensor grad,
+    const at::Tensor inputs,
+    const at::Tensor embeddings,
+    const at::Tensor offsets_list,
+    const at::Tensor resolutions_list,
+    const uint32_t N, const uint32_t num_dim, const uint32_t n_fearures, const uint32_t n_levels, const uint32_t Rb,
+    at::Tensor out_key,
+    at::Tensor out_val,
+    at::Tensor out_counter,
+    const at::optional<at::Tensor> dy_dx,
+    at::optional<at::Tensor> grad_inputs,
+    const at::optional<at::Tensor> binary_vxl,
+    const at::optional<at::Tensor> min_level_id
+    ) {
+
+    CHECK_CUDA(grad);
+    CHECK_CUDA(inputs);
+    CHECK_CUDA(embeddings);
+    CHECK_CUDA(offsets_list);
+    CHECK_CUDA(resolutions_list);
+    CHECK_CUDA(out_key);
+    CHECK_CUDA(out_val);
+    CHECK_CUDA(out_counter);
+
+    CHECK_CONTIGUOUS(grad);
+    CHECK_CONTIGUOUS(inputs);
+    CHECK_CONTIGUOUS(embeddings);
+    CHECK_CONTIGUOUS(offsets_list);
+    CHECK_CONTIGUOUS(resolutions_list);
+    CHECK_CONTIGUOUS(out_key);
+    CHECK_CONTIGUOUS(out_val);
+    CHECK_CONTIGUOUS(out_counter);
+
+    TORCH_CHECK(out_key.scalar_type() == at::ScalarType::Long, "out_key must be an int64 tensor");
+    TORCH_CHECK(out_counter.scalar_type() == at::ScalarType::Int, "out_counter must be an int32 tensor");
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    grad.scalar_type(), "grid_encode_backward_collect", ([&] {
+        grid_encode_backward_collect_cuda<scalar_t>(
+            grad.data_ptr<scalar_t>(),
+            inputs.data_ptr<float>(),
+            embeddings.data_ptr<scalar_t>(),
+            offsets_list.data_ptr<int>(),
+            resolutions_list.data_ptr<int>(),
+            N, num_dim, n_fearures, n_levels, Rb,
+            dy_dx.has_value() ? dy_dx.value().data_ptr<scalar_t>() : nullptr,
+            grad_inputs.has_value() ? grad_inputs.value().data_ptr<scalar_t>() : nullptr,
+            binary_vxl.has_value() ? binary_vxl.value().data_ptr<bool>() : nullptr,
+            min_level_id.has_value() ? min_level_id.value().data_ptr<int>() : nullptr,
+            out_key.data_ptr<int64_t>(),
+            out_val.data_ptr<scalar_t>(),
+            reinterpret_cast<unsigned int*>(out_counter.data_ptr<int>())
             );
     }));
 

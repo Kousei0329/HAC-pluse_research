@@ -153,6 +153,8 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
             use_anchor_cond_norm=args_param.use_anchor_cond_norm,
             use_causal_knn=args_param.use_causal_knn,
             causal_knn_K=args_param.causal_knn_K,
+            causal_knn_hidden_mult=args_param.causal_knn_hidden_mult,
+            mlp_grid_hidden_mult=args_param.mlp_grid_hidden_mult,
             use_3gmm=args_param.use_3gmm,
             use_reno=args_param.use_reno,
             reno_ckpt_path=args_param.reno_ckpt_path,
@@ -346,7 +348,7 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
 
             # Log and save
             torch.cuda.synchronize(); t_start_log = time.time()
-            training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger, args_param.model_path, quantize_mlp_bits=args_param.quantize_mlp_bits, quantize_mlp_fp16=args_param.quantize_mlp_fp16, prune_mlp_ratio=args_param.prune_mlp_ratio, prune_finetune_iters=args_param.prune_finetune_iters, prune_finetune_lr=args_param.prune_finetune_lr, prune_finetune_lambda_q=args_param.prune_finetune_lambda_q)
+            training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger, args_param.model_path, quantize_mlp_bits=args_param.quantize_mlp_bits, quantize_mlp_fp16=args_param.quantize_mlp_fp16, quantize_mlp_fp8=args_param.quantize_mlp_fp8, fp8_variant=args_param.fp8_variant, prune_mlp_ratio=args_param.prune_mlp_ratio, prune_finetune_iters=args_param.prune_finetune_iters, prune_finetune_lr=args_param.prune_finetune_lr, prune_finetune_lambda_q=args_param.prune_finetune_lambda_q)
             if (iteration in saving_iterations):
                 logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -427,47 +429,55 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
                     # measured during training understates the real encoded bpp.
                     _mask_anchor = gaussians.get_mask_anchor.detach().to(torch.bool)[:, 0]
                     _anchor = gaussians.get_anchor[_mask_anchor].detach()
-                    _anchor_int = torch.round(_anchor / gaussians.voxel_size).int()
-                    _shift = _anchor_int.min(dim=0)[0]
-                    _anchor_shifted = (_anchor_int - _shift)
-                    _coords = torch.cat((_anchor_shifted[:, :1] * 0, _anchor_shifted), dim=-1).int()
-                    _feats = torch.ones((_coords.shape[0], 1), device='cuda')
 
-                    # Subsample to avoid OOM on large scenes; bpp estimate is still valid with a subset
-                    _MAX_RENO_ANCHORS = 20_000
-                    if _coords.shape[0] > _MAX_RENO_ANCHORS:
-                        _sub_idx = torch.randperm(_coords.shape[0], device='cuda')[:_MAX_RENO_ANCHORS]
-                        _coords = _coords[_sub_idx]
-                        _feats = _feats[_sub_idx]
-
-                with torch.enable_grad():
-                    _reno_net.train()
-                    reno_optimizer.zero_grad()
-                    _bpp = _reno_net(_ST(coords=_coords, feats=_feats))
-                    _bpp.backward()
-                # RENO has its own optimizer, entirely separate from gaussians.optimizer -- the
-                # gradient clipping added for the main loss's NaN-divergence never covered this
-                # step. An unclipped bad RENO update can make _bpp (hence _reno_avg_bpp_ema, which
-                # feeds directly into the main anchor-mask rate loss below) NaN/Inf, which then
-                # poisons gaussians' own gradients on the very next main-loss backward() even
-                # though *those* are clipped -- clipping a NaN gradient still leaves it NaN.
-                _reno_grad_norm = torch.nn.utils.clip_grad_norm_(_reno_net.parameters(), max_norm=1.0)
-                if torch.isfinite(_reno_grad_norm):
-                    reno_optimizer.step()
+                # Every anchor's mask gate can be transiently closed at this exact iteration (e.g.
+                # right after a heavy prune) -- nothing to fine-tune RENO on this step, and
+                # _anchor_int.min(dim=0) on an empty tensor raises IndexError, so skip instead.
+                if _anchor.shape[0] == 0:
+                    logger.info(f"[RENO] WARNING: iter={iteration} all anchors masked out; skipping this RENO fine-tune step")
                 else:
-                    logger.info(f"[RENO] WARNING: iter={iteration} non-finite grad norm ({_reno_grad_norm.item()}); skipping reno_optimizer step")
-                reno_optimizer.zero_grad(set_to_none=True)
-                _new_bpp = _bpp.item()
-                if math.isfinite(_new_bpp):
-                    _reno_avg_bpp = _new_bpp  # frozen price-per-anchor for next iterations' rate loss
-                    _reno_avg_bpp_ema = (_reno_avg_bpp if _reno_avg_bpp_ema is None else
-                                          _RENO_EMA_DECAY * _reno_avg_bpp_ema + (1 - _RENO_EMA_DECAY) * _reno_avg_bpp)
-                else:
-                    logger.info(f"[RENO] WARNING: iter={iteration} bpp is non-finite ({_new_bpp}); "
-                                f"keeping previous price ema={_reno_avg_bpp_ema}")
+                    with torch.no_grad():
+                        _anchor_int = torch.round(_anchor / gaussians.voxel_size).int()
+                        _shift = _anchor_int.min(dim=0)[0]
+                        _anchor_shifted = (_anchor_int - _shift)
+                        _coords = torch.cat((_anchor_shifted[:, :1] * 0, _anchor_shifted), dim=-1).int()
+                        _feats = torch.ones((_coords.shape[0], 1), device='cuda')
 
-                if iteration % (args_param.reno_train_interval * 10) == 0:
-                    logger.info(f"[RENO] iter={iteration} bpp={_bpp.item():.4f} anchor_num={_coords.shape[0]}")
+                        # Subsample to avoid OOM on large scenes; bpp estimate is still valid with a subset
+                        _MAX_RENO_ANCHORS = 20_000
+                        if _coords.shape[0] > _MAX_RENO_ANCHORS:
+                            _sub_idx = torch.randperm(_coords.shape[0], device='cuda')[:_MAX_RENO_ANCHORS]
+                            _coords = _coords[_sub_idx]
+                            _feats = _feats[_sub_idx]
+
+                    with torch.enable_grad():
+                        _reno_net.train()
+                        reno_optimizer.zero_grad()
+                        _bpp = _reno_net(_ST(coords=_coords, feats=_feats))
+                        _bpp.backward()
+                    # RENO has its own optimizer, entirely separate from gaussians.optimizer -- the
+                    # gradient clipping added for the main loss's NaN-divergence never covered this
+                    # step. An unclipped bad RENO update can make _bpp (hence _reno_avg_bpp_ema, which
+                    # feeds directly into the main anchor-mask rate loss below) NaN/Inf, which then
+                    # poisons gaussians' own gradients on the very next main-loss backward() even
+                    # though *those* are clipped -- clipping a NaN gradient still leaves it NaN.
+                    _reno_grad_norm = torch.nn.utils.clip_grad_norm_(_reno_net.parameters(), max_norm=1.0)
+                    if torch.isfinite(_reno_grad_norm):
+                        reno_optimizer.step()
+                    else:
+                        logger.info(f"[RENO] WARNING: iter={iteration} non-finite grad norm ({_reno_grad_norm.item()}); skipping reno_optimizer step")
+                    reno_optimizer.zero_grad(set_to_none=True)
+                    _new_bpp = _bpp.item()
+                    if math.isfinite(_new_bpp):
+                        _reno_avg_bpp = _new_bpp  # frozen price-per-anchor for next iterations' rate loss
+                        _reno_avg_bpp_ema = (_reno_avg_bpp if _reno_avg_bpp_ema is None else
+                                              _RENO_EMA_DECAY * _reno_avg_bpp_ema + (1 - _RENO_EMA_DECAY) * _reno_avg_bpp)
+                    else:
+                        logger.info(f"[RENO] WARNING: iter={iteration} bpp is non-finite ({_new_bpp}); "
+                                    f"keeping previous price ema={_reno_avg_bpp_ema}")
+
+                    if iteration % (args_param.reno_train_interval * 10) == 0:
+                        logger.info(f"[RENO] iter={iteration} bpp={_bpp.item():.4f} anchor_num={_coords.shape[0]}")
 
             if (iteration in checkpoint_iterations):
                 logger.info("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -507,7 +517,7 @@ def prepare_output_and_logger(args):
     return tb_writer
 
 
-def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, wandb=None, logger=None, pre_path_name='', quantize_mlp_bits=0, quantize_mlp_fp16=False, prune_mlp_ratio=0.0, prune_finetune_iters=300, prune_finetune_lr=1e-4, prune_finetune_lambda_q=1000.0):
+def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, wandb=None, logger=None, pre_path_name='', quantize_mlp_bits=0, quantize_mlp_fp16=False, quantize_mlp_fp8=False, fp8_variant='e4m3', prune_mlp_ratio=0.0, prune_finetune_iters=300, prune_finetune_lr=1e-4, prune_finetune_lambda_q=1000.0):
     if tb_writer:
         tb_writer.add_scalar(f'{dataset_name}/train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar(f'{dataset_name}/train_loss_patches/total_loss', loss.item(), iteration)
@@ -534,11 +544,13 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
                         # entropy heads badly miscalibrated for outlier anchors; recover with a
                         # brief rate-loss-only fine-tune before quantizing/reporting final sizes.
                         scene.gaussians.finetune_pruned_mlps_(iters=prune_finetune_iters, lr=prune_finetune_lr, lambda_q_reg=prune_finetune_lambda_q)
-                if quantize_mlp_fp16:
+                if quantize_mlp_fp8:
                     # Quantize before estimate_final_bits/conduct_encoding/the render+eval loop
                     # below, so every number reported past this point (bitstream sizes AND
-                    # PSNR/SSIM/LPIPS) consistently reflects the fp16 entropy MLPs, not a mix of
+                    # PSNR/SSIM/LPIPS) consistently reflects the fp8 entropy MLPs, not a mix of
                     # fp32 compute with a fake smaller reported size.
+                    scene.gaussians.quantize_mlps_fp8_(fp8_variant=fp8_variant)
+                elif quantize_mlp_fp16:
                     scene.gaussians.quantize_mlps_fp16_()
                 elif quantize_mlp_bits > 0:
                     scene.gaussians.quantize_mlps_(bits=quantize_mlp_bits)
@@ -880,9 +892,13 @@ if __name__ == "__main__":
     parser.add_argument('--use_causal_knn', action='store_true', default=True, help='Enable causal K-NN context aggregation for hash grid features (Morton order)')
     parser.add_argument('--no_use_causal_knn', dest='use_causal_knn', action='store_false', help='Disable use_causal_knn (baseline/ablation)')
     parser.add_argument('--causal_knn_K', type=int, default=16, help='Number of causal (Morton-order, backward-only) neighbors aggregated per anchor by CausalKNNContext')
+    parser.add_argument('--causal_knn_hidden_mult', type=int, default=8, help='Hidden-width multiplier (x hash_dim) for CausalKNNContext.correction. Must be even. Default 8 matches the original widened design (~484K params at hash_dim=96); lower (e.g. 2 or 4) trades capacity for a much smaller transmitted size now that get_mlp_size() counts causal_knn.')
+    parser.add_argument('--mlp_grid_hidden_mult', type=int, default=8, help='Hidden-width multiplier (x feat_dim) for mlp_grid. Must be even. Default 8 matches the widened/deepened design (~245K params); lower (e.g. 4) trades capacity for a smaller transmitted size.')
     parser.add_argument('--use_3gmm', action='store_true', default=False, help="Use a 3-component Gaussian mixture (Entropy_gaussian_mix_prob_3) for feat's entropy model instead of the default 2-component mixture")
     parser.add_argument('--quantize_mlp_bits', type=int, default=0, help="If >0, post-training fake-quantize mlp_grid/mlp_deform weight matrices to this many bits before the final size/quality report (0 = disabled, keep fp32)")
-    parser.add_argument('--quantize_mlp_fp16', action='store_true', default=False, help="Post-training round-trip mlp_grid/mlp_deform parameters through true IEEE half precision (fp16) before the final size/quality report. Takes priority over --quantize_mlp_bits if both are set.")
+    parser.add_argument('--quantize_mlp_fp16', action='store_true', default=False, help="Post-training round-trip mlp_grid/mlp_deform (and causal_knn, if enabled) parameters through true IEEE half precision (fp16) before the final size/quality report. Takes priority over --quantize_mlp_bits if both are set.")
+    parser.add_argument('--quantize_mlp_fp8', action='store_true', default=False, help="Post-training round-trip mlp_grid/mlp_deform (and causal_knn, if enabled) parameters through true 8-bit float (fp8) before the final size/quality report. Takes priority over --quantize_mlp_fp16 and --quantize_mlp_bits if multiple are set.")
+    parser.add_argument('--fp8_variant', type=str, default='e4m3', choices=['e4m3', 'e5m2'], help="Which 8-bit float format --quantize_mlp_fp8 uses: e4m3 (more mantissa, less range -- better for weight-scale tensors) or e5m2 (more range, less mantissa)")
     parser.add_argument('--prune_mlp_ratio', type=float, default=0.0, help="If >0, post-training structurally prune this fraction of GEGLU hidden units out of mlp_grid/mlp_deform (shrinks the actual matrices) before quantization/the final size/quality report (0 = disabled)")
     parser.add_argument('--prune_finetune_iters', type=int, default=300, help="Number of rate-loss-only fine-tuning steps applied to mlp_grid/mlp_deform right after structured pruning (0 = skip fine-tuning)")
     parser.add_argument('--prune_finetune_lr', type=float, default=1e-4, help="Learning rate for the post-prune fine-tuning steps")

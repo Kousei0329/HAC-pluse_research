@@ -35,6 +35,24 @@ void grid_encode_backward(
     const at::optional<at::Tensor> min_level_id
     );
 
+// Deterministic collect pass for grid_encode_backward -- see the .cu file for why this exists
+// and grid.py for how the caller sorts/reduces out_key/out_val afterward.
+void grid_encode_backward_collect(
+    const at::Tensor grad,
+    const at::Tensor inputs,
+    const at::Tensor embeddings,
+    const at::Tensor offsets_list,
+    const at::Tensor resolutions_list,
+    const uint32_t N, const uint32_t num_dim, const uint32_t n_features, const uint32_t n_levels, const uint32_t Rb,
+    at::Tensor out_key,
+    at::Tensor out_val,
+    at::Tensor out_counter,
+    const at::optional<at::Tensor> dy_dx,
+    at::optional<at::Tensor> grad_inputs,
+    const at::optional<at::Tensor> binary_vxl,
+    const at::optional<at::Tensor> min_level_id
+    );
+
 void grid_encode_mix2D_forward(
     const at::Tensor inputs_xy, const at::Tensor inputs_xz, const at::Tensor inputs_yz,
     const at::Tensor embeddings_xy, const at::Tensor embeddings_xz, const at::Tensor embeddings_yz,
