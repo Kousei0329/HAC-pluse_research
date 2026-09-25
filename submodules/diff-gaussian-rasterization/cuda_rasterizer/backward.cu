@@ -13,6 +13,8 @@
 #include "auxiliary.h"
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
+#include <algorithm>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 #include <cub/device/device_radix_sort.cuh>
@@ -21,7 +23,31 @@
 #include <thrust/copy.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/execution_policy.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Exception.h>
 namespace cg = cooperative_groups;
+
+// Scratch allocation for the deterministic backward path, routed through
+// PyTorch's own caching allocator instead of raw cudaMalloc/cudaFree.
+// render_deterministic_chunk allocates/frees ~10 scratch buffers per chunk,
+// possibly thousands of times over a training run (2+ chunks/iteration x
+// tens of thousands of iterations); raw cudaMalloc/cudaFree operate on a
+// pool separate from PyTorch's allocator and fragment badly under that much
+// churn (observed: PyTorch reporting most of its reserved memory as
+// unusable slivers after ~10k iterations, then failing an unrelated
+// allocation elsewhere in training). raw_alloc/raw_delete draw from and
+// return to PyTorch's own pool, which is designed for exactly this
+// alloc/free churn pattern.
+template <typename T>
+static T* det_alloc(size_t count)
+{
+	return static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(count * sizeof(T)));
+}
+template <typename T>
+static void det_free(T* ptr)
+{
+	c10::cuda::CUDACachingAllocator::raw_delete(static_cast<void*>(ptr));
+}
 
 // Backward pass for conversion of spherical harmonics to RGB for
 // each Gaussian.
@@ -613,18 +639,20 @@ renderCUDA_deterministic(
 	const float* __restrict__ dL_dpixels,
 	unsigned long long* __restrict__ out_counter,
 	int64_t* __restrict__ out_key,
-	float* __restrict__ out_val)
+	float* __restrict__ out_val,
+	uint32_t row_offset)
 {
 	auto block = cg::this_thread_block();
 	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+	const uint32_t tile_row = block.group_index().y + row_offset;
+	const uint2 pix_min = { block.group_index().x * BLOCK_X, tile_row * BLOCK_Y };
 	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	const uint32_t pix_id = W * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x, (float)pix.y };
 
 	const bool inside = pix.x < W&& pix.y < H;
-	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
+	const uint2 range = ranges[tile_row * horizontal_blocks + block.group_index().x];
 
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
@@ -726,6 +754,7 @@ renderCUDA_deterministic(
 
 			if (COLLECT)
 			{
+				// Single shared slot counter for this launch (chunk-wide).
 				const int64_t key = ((int64_t)global_id << 32) | (int64_t)pix_id;
 				unsigned long long slot = atomicAdd(out_counter, (unsigned long long)1);
 				out_key[slot] = key;
@@ -735,7 +764,11 @@ renderCUDA_deterministic(
 			}
 			else
 			{
-				atomicAdd(out_counter, (unsigned long long)1);
+				// Per-row counter (indexed by this launch's local tile row),
+				// so one launch over the whole image yields a full per-row
+				// histogram in a single pass -- used to plan memory-safe
+				// chunk boundaries without a separate counting pass per row.
+				atomicAdd(&out_counter[block.group_index().y], (unsigned long long)1);
 			}
 		}
 	}
@@ -795,10 +828,14 @@ __global__ void scatter_group_bounds_kernel(
 }
 
 // One thread per group: a plain sequential local sum over that group's
-// contiguous sorted range, then a single non-atomic write into the real
-// output buffers (safe because these buffers are zero-initialized by the
-// caller and this kernel is the ONLY writer of any given Gaussian's slot --
-// each global_id appears in at most one group).
+// contiguous sorted range, then a single non-atomic accumulate into the real
+// output buffers (safe -- these buffers are zero-initialized once by the
+// caller before the first chunk, and chunks are launched strictly in
+// sequence on the same stream, so a given Gaussian's slot is only ever
+// touched by one kernel invocation at a time. A Gaussian whose tile span
+// crosses a chunk boundary gets contributions from more than one chunk, so
+// this must accumulate (+=), not overwrite -- the order across chunks is
+// fixed (ascending chunk index), so this stays deterministic).
 template <uint32_t C>
 __global__ void reduce_groups_kernel(
 	const float* __restrict__ sorted_vals,
@@ -827,13 +864,170 @@ __global__ void reduce_groups_kernel(
 	}
 
 	for (int ch = 0; ch < C; ch++)
-		dL_dcolors[gid * C + ch] = sum[ch];
-	dL_dmean2D[gid].x = sum[C + 0];
-	dL_dmean2D[gid].y = sum[C + 1];
-	dL_dconic2D[gid].x = sum[C + 2];
-	dL_dconic2D[gid].y = sum[C + 3];
-	dL_dconic2D[gid].w = sum[C + 4];
-	dL_dopacity[gid] = sum[C + 5];
+		dL_dcolors[gid * C + ch] += sum[ch];
+	dL_dmean2D[gid].x += sum[C + 0];
+	dL_dmean2D[gid].y += sum[C + 1];
+	dL_dconic2D[gid].x += sum[C + 2];
+	dL_dconic2D[gid].y += sum[C + 3];
+	dL_dconic2D[gid].w += sum[C + 4];
+	dL_dopacity[gid] += sum[C + 5];
+}
+
+// Runs the collect -> sort -> reduce pipeline for one memory-bounded chunk
+// of tile rows [row_start, row_end), accumulating into the (already
+// zero-initialized) output buffers. N is the exact survivor count for this
+// row range, already known from the row-histogram pass -- no re-counting.
+template <uint32_t C>
+static void render_deterministic_chunk(
+	const uint2* ranges, const uint32_t* point_list, int W, int H,
+	const float* bg_color, const float2* means2D, const float4* conic_opacity,
+	const float* colors, const float* final_Ts, const uint32_t* n_contrib,
+	const float* dL_dpixels, const dim3 block, uint32_t horizontal_blocks,
+	uint32_t row_start, uint32_t row_end, unsigned long long N,
+	float3* dL_dmean2D, float4* dL_dconic2D, float* dL_dopacity, float* dL_dcolors)
+{
+	const dim3 chunk_grid(horizontal_blocks, row_end - row_start);
+
+	int64_t* d_key = det_alloc<int64_t>(N);
+	float* d_val = det_alloc<float>(N * (C + 6));
+	unsigned long long* d_slot_counter = det_alloc<unsigned long long>(1);
+	cudaMemset(d_slot_counter, 0, sizeof(unsigned long long));
+
+	renderCUDA_deterministic<C, true> << <chunk_grid, block >> > (
+		ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+		final_Ts, n_contrib, dL_dpixels, d_slot_counter, d_key, d_val, row_start);
+	det_free(d_slot_counter);
+
+	// Sort by key, carrying a permutation index (cub radix sort on the keys
+	// themselves is deterministic: it's a pure reordering of distinct keys,
+	// with no floating-point accumulation involved).
+	int* d_idx_in = det_alloc<int>(N);
+	int* d_idx_out = det_alloc<int>(N);
+	int64_t* d_key_sorted = det_alloc<int64_t>(N);
+
+	{
+		auto iter = thrust::make_counting_iterator<int>(0);
+		thrust::device_ptr<int> idx_ptr(d_idx_in);
+		thrust::copy(iter, iter + N, idx_ptr);
+	}
+
+	void* d_temp = nullptr;
+	size_t temp_bytes = 0;
+	cub::DeviceRadixSort::SortPairs(d_temp, temp_bytes, d_key, d_key_sorted, d_idx_in, d_idx_out, (int)N);
+	d_temp = c10::cuda::CUDACachingAllocator::raw_alloc(temp_bytes);
+	cub::DeviceRadixSort::SortPairs(d_temp, temp_bytes, d_key, d_key_sorted, d_idx_in, d_idx_out, (int)N);
+	c10::cuda::CUDACachingAllocator::raw_delete(d_temp);
+
+	float* d_val_sorted = det_alloc<float>(N * (C + 6));
+	{
+		const int threads = 256;
+		const unsigned long long blocks = (N + threads - 1) / threads;
+		gather_payload_kernel<C> << <blocks, threads >> > (d_val, d_idx_out, d_val_sorted, N);
+	}
+
+	// Mark group starts, then an exact/associative INTEGER exclusive scan
+	// (safe -- only the analogous FLOAT cumsum was found to be
+	// non-deterministic on this CUDA/torch combination) to assign each
+	// entry its group index.
+	int* d_flag = det_alloc<int>(N);
+	int* d_group_index = det_alloc<int>(N);
+	{
+		const int threads = 256;
+		const unsigned long long blocks = (N + threads - 1) / threads;
+		mark_group_starts_kernel << <blocks, threads >> > (d_key_sorted, d_flag, N);
+	}
+
+	void* d_temp2 = nullptr;
+	size_t temp_bytes2 = 0;
+	cub::DeviceScan::ExclusiveSum(d_temp2, temp_bytes2, d_flag, d_group_index, (int)N);
+	d_temp2 = c10::cuda::CUDACachingAllocator::raw_alloc(temp_bytes2);
+	cub::DeviceScan::ExclusiveSum(d_temp2, temp_bytes2, d_flag, d_group_index, (int)N);
+	c10::cuda::CUDACachingAllocator::raw_delete(d_temp2);
+
+	int last_flag = 0, last_group_index = 0;
+	cudaMemcpy(&last_flag, d_flag + (N - 1), sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(&last_group_index, d_group_index + (N - 1), sizeof(int), cudaMemcpyDeviceToHost);
+	int num_groups = last_group_index + last_flag;
+
+	if (std::getenv("DEBUG_RASTERIZER_DETERMINISTIC"))
+		fprintf(stderr, "[render_deterministic] rows=[%u,%u) N=%llu num_groups=%d\n", row_start, row_end, N, num_groups);
+
+	int* d_group_start = det_alloc<int>(num_groups);
+	int* d_group_gid = det_alloc<int>(num_groups);
+	{
+		const int threads = 256;
+		const unsigned long long blocks = (N + threads - 1) / threads;
+		scatter_group_bounds_kernel << <blocks, threads >> > (
+			d_key_sorted, d_flag, d_group_index, d_group_start, d_group_gid, N);
+	}
+
+	{
+		const int threads = 256;
+		const int blocks = (num_groups + threads - 1) / threads;
+		reduce_groups_kernel<C> << <blocks, threads >> > (
+			d_val_sorted, d_group_start, d_group_gid, num_groups, N,
+			dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
+	}
+
+	det_free(d_key);
+	det_free(d_val);
+	det_free(d_idx_in);
+	det_free(d_idx_out);
+	det_free(d_key_sorted);
+	det_free(d_val_sorted);
+	det_free(d_flag);
+	det_free(d_group_index);
+	det_free(d_group_start);
+	det_free(d_group_gid);
+}
+
+// Wraps render_deterministic_chunk with an adaptive fallback: if this chunk
+// doesn't fit in memory (a c10 CUDA-out-of-memory error, thrown by the
+// caching allocator), split its row range in half and retry each half. Row
+// counts (and hence the split points) are a deterministic function of the
+// inputs, so which chunks end up needing a retry is itself reproducible run
+// to run on a dedicated GPU (no other process's usage to make it vary) --
+// this only changes how memory-constrained the moment happens to be, not
+// anything about the fixed reduction order render_deterministic_chunk uses.
+template <uint32_t C>
+static void render_deterministic_chunk_safe(
+	const uint2* ranges, const uint32_t* point_list, int W, int H,
+	const float* bg_color, const float2* means2D, const float4* conic_opacity,
+	const float* colors, const float* final_Ts, const uint32_t* n_contrib,
+	const float* dL_dpixels, const dim3 block, uint32_t horizontal_blocks,
+	const std::vector<unsigned long long>& row_counts,
+	uint32_t row_start, uint32_t row_end,
+	float3* dL_dmean2D, float4* dL_dconic2D, float* dL_dopacity, float* dL_dcolors)
+{
+	unsigned long long N = 0;
+	for (uint32_t r = row_start; r < row_end; r++)
+		N += row_counts[r];
+	if (N == 0)
+		return;
+
+	try
+	{
+		render_deterministic_chunk<C>(
+			ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+			final_Ts, n_contrib, dL_dpixels, block, horizontal_blocks,
+			row_start, row_end, N, dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
+	}
+	catch (const c10::Error&)
+	{
+		if (row_end - row_start <= 1)
+			throw;
+		if (std::getenv("DEBUG_RASTERIZER_DETERMINISTIC"))
+			fprintf(stderr, "[render_deterministic] chunk rows=[%u,%u) N=%llu didn't fit in memory -- splitting and retrying\n", row_start, row_end, N);
+		uint32_t mid = row_start + (row_end - row_start) / 2;
+		render_deterministic_chunk_safe<C>(
+			ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+			final_Ts, n_contrib, dL_dpixels, block, horizontal_blocks, row_counts,
+			row_start, mid, dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
+		render_deterministic_chunk_safe<C>(
+			ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+			final_Ts, n_contrib, dL_dpixels, block, horizontal_blocks, row_counts,
+			mid, row_end, dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
+	}
 }
 
 void BACKWARD::render_deterministic(
@@ -854,126 +1048,64 @@ void BACKWARD::render_deterministic(
 	float* dL_dcolors)
 {
 	constexpr uint32_t C = NUM_CHANNELS;
+	const uint32_t horizontal_blocks = grid.x;
+	const uint32_t vertical_blocks = grid.y;
 
-	unsigned long long* d_counter;
-	cudaMalloc(&d_counter, sizeof(unsigned long long));
-	cudaMemset(d_counter, 0, sizeof(unsigned long long));
+	// Pass 1: a single launch over the WHOLE image gets an exact per-tile-row
+	// survivor histogram (cheap -- one counter per row, no large buffers).
+	// This bounds how much memory pass 2+ will need to materialize, since
+	// that scales with the number of (pixel, Gaussian) survivors, which
+	// grows with the number of Gaussians touching each tile -- for a scene
+	// with heavy anchor growth (densification) this can be orders of
+	// magnitude larger than at the start of training, and materializing all
+	// of it into scratch buffers for the whole image at once can exceed
+	// available GPU memory. Splitting by tile row and keeping each chunk's
+	// scratch buffers under a fixed byte budget avoids that, while staying
+	// bit-exact deterministic: chunk boundaries are themselves computed
+	// deterministically from this histogram, and chunks are reduced into
+	// the (already zero-initialized) outputs via += in a fixed, ascending
+	// order -- so the overall summation order is fixed run to run.
+	unsigned long long* d_row_counts = det_alloc<unsigned long long>(vertical_blocks);
+	cudaMemset(d_row_counts, 0, vertical_blocks * sizeof(unsigned long long));
 
-	// Pass 1: count exactly how many (pixel, Gaussian) survivors there are.
 	renderCUDA_deterministic<C, false> << <grid, block >> > (
 		ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
-		final_Ts, n_contrib, dL_dpixels, d_counter, nullptr, nullptr);
+		final_Ts, n_contrib, dL_dpixels, d_row_counts, nullptr, nullptr, 0);
 
-	unsigned long long N = 0;
-	cudaMemcpy(&N, d_counter, sizeof(unsigned long long), cudaMemcpyDeviceToHost);
+	std::vector<unsigned long long> row_counts(vertical_blocks);
+	cudaMemcpy(row_counts.data(), d_row_counts, vertical_blocks * sizeof(unsigned long long), cudaMemcpyDeviceToHost);
+	det_free(d_row_counts);
 
-	if (N == 0)
+	// Byte budget per chunk (default 3 GiB; override via env var for tuning).
+	// BYTES_PER_ENTRY covers every scratch array in render_deterministic_chunk:
+	// key(8) + val(9*4) + idx_in(4) + idx_out(4) + key_sorted(8) + val_sorted(9*4) + flag(4) + group_index(4).
+	const unsigned long long BYTES_PER_ENTRY = sizeof(int64_t) + (C + 6) * sizeof(float)
+		+ 2 * sizeof(int) + sizeof(int64_t) + (C + 6) * sizeof(float) + 2 * sizeof(int);
+	unsigned long long budget_bytes = 3ull * 1024 * 1024 * 1024;
+	if (const char* v = std::getenv("RASTERIZER_DETERMINISTIC_CHUNK_BYTES"))
+		budget_bytes = strtoull(v, nullptr, 10);
+	unsigned long long max_entries_per_chunk = std::max<unsigned long long>(1, budget_bytes / BYTES_PER_ENTRY);
+
+	uint32_t chunk_start = 0;
+	unsigned long long running = 0;
+	for (uint32_t r = 0; r < vertical_blocks; r++)
 	{
-		cudaFree(d_counter);
-		return;
+		if (running > 0 && running + row_counts[r] > max_entries_per_chunk)
+		{
+			render_deterministic_chunk_safe<C>(
+				ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+				final_Ts, n_contrib, dL_dpixels, block, horizontal_blocks, row_counts,
+				chunk_start, r, dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
+			chunk_start = r;
+			running = 0;
+		}
+		running += row_counts[r];
 	}
-
-	int64_t* d_key;
-	float* d_val;
-	cudaMalloc(&d_key, N * sizeof(int64_t));
-	cudaMalloc(&d_val, N * (C + 6) * sizeof(float));
-	cudaMemset(d_counter, 0, sizeof(unsigned long long));
-
-	// Pass 2: collect every survivor's key + packed gradient payload.
-	renderCUDA_deterministic<C, true> << <grid, block >> > (
-		ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
-		final_Ts, n_contrib, dL_dpixels, d_counter, d_key, d_val);
-
-	// Sort by key, carrying a permutation index (cub radix sort on the keys
-	// themselves is deterministic: it's a pure reordering of distinct keys,
-	// with no floating-point accumulation involved).
-	int* d_idx_in;
-	int* d_idx_out;
-	int64_t* d_key_sorted;
-	cudaMalloc(&d_idx_in, N * sizeof(int));
-	cudaMalloc(&d_idx_out, N * sizeof(int));
-	cudaMalloc(&d_key_sorted, N * sizeof(int64_t));
-
-	{
-		auto iter = thrust::make_counting_iterator<int>(0);
-		thrust::device_ptr<int> idx_ptr(d_idx_in);
-		thrust::copy(iter, iter + N, idx_ptr);
-	}
-
-	void* d_temp = nullptr;
-	size_t temp_bytes = 0;
-	cub::DeviceRadixSort::SortPairs(d_temp, temp_bytes, d_key, d_key_sorted, d_idx_in, d_idx_out, (int)N);
-	cudaMalloc(&d_temp, temp_bytes);
-	cub::DeviceRadixSort::SortPairs(d_temp, temp_bytes, d_key, d_key_sorted, d_idx_in, d_idx_out, (int)N);
-	cudaFree(d_temp);
-
-	float* d_val_sorted;
-	cudaMalloc(&d_val_sorted, N * (C + 6) * sizeof(float));
-	{
-		const int threads = 256;
-		const unsigned long long blocks = (N + threads - 1) / threads;
-		gather_payload_kernel<C> << <blocks, threads >> > (d_val, d_idx_out, d_val_sorted, N);
-	}
-
-	// Mark group starts, then an exact/associative INTEGER exclusive scan
-	// (safe -- only the analogous FLOAT cumsum was found to be
-	// non-deterministic on this CUDA/torch combination) to assign each
-	// entry its group index.
-	int* d_flag;
-	int* d_group_index;
-	cudaMalloc(&d_flag, N * sizeof(int));
-	cudaMalloc(&d_group_index, N * sizeof(int));
-	{
-		const int threads = 256;
-		const unsigned long long blocks = (N + threads - 1) / threads;
-		mark_group_starts_kernel << <blocks, threads >> > (d_key_sorted, d_flag, N);
-	}
-
-	void* d_temp2 = nullptr;
-	size_t temp_bytes2 = 0;
-	cub::DeviceScan::ExclusiveSum(d_temp2, temp_bytes2, d_flag, d_group_index, (int)N);
-	cudaMalloc(&d_temp2, temp_bytes2);
-	cub::DeviceScan::ExclusiveSum(d_temp2, temp_bytes2, d_flag, d_group_index, (int)N);
-	cudaFree(d_temp2);
-
-	int last_flag = 0, last_group_index = 0;
-	cudaMemcpy(&last_flag, d_flag + (N - 1), sizeof(int), cudaMemcpyDeviceToHost);
-	cudaMemcpy(&last_group_index, d_group_index + (N - 1), sizeof(int), cudaMemcpyDeviceToHost);
-	int num_groups = last_group_index + last_flag;
-
-	if (std::getenv("DEBUG_RASTERIZER_DETERMINISTIC"))
-		fprintf(stderr, "[render_deterministic] N=%llu num_groups=%d\n", N, num_groups);
-
-	int* d_group_start;
-	int* d_group_gid;
-	cudaMalloc(&d_group_start, num_groups * sizeof(int));
-	cudaMalloc(&d_group_gid, num_groups * sizeof(int));
-	{
-		const int threads = 256;
-		const unsigned long long blocks = (N + threads - 1) / threads;
-		scatter_group_bounds_kernel << <blocks, threads >> > (
-			d_key_sorted, d_flag, d_group_index, d_group_start, d_group_gid, N);
-	}
-
-	{
-		const int threads = 256;
-		const int blocks = (num_groups + threads - 1) / threads;
-		reduce_groups_kernel<C> << <blocks, threads >> > (
-			d_val_sorted, d_group_start, d_group_gid, num_groups, N,
-			dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
-	}
-
-	cudaFree(d_counter);
-	cudaFree(d_key);
-	cudaFree(d_val);
-	cudaFree(d_idx_in);
-	cudaFree(d_idx_out);
-	cudaFree(d_key_sorted);
-	cudaFree(d_val_sorted);
-	cudaFree(d_flag);
-	cudaFree(d_group_index);
-	cudaFree(d_group_start);
-	cudaFree(d_group_gid);
+	if (running > 0)
+		render_deterministic_chunk_safe<C>(
+			ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+			final_Ts, n_contrib, dL_dpixels, block, horizontal_blocks, row_counts,
+			chunk_start, vertical_blocks, dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors);
 }
 
 void BACKWARD::preprocess(
