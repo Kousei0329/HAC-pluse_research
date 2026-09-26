@@ -834,6 +834,7 @@ class GaussianModel(nn.Module):
         quant_bits = getattr(self, '_mlp_quant_bits', None)
         is_fp16 = getattr(self, '_mlp_fp16', False)
         is_fp8 = getattr(self, '_mlp_fp8', False)
+        is_fp4 = getattr(self, '_mlp_fp4', False)
         for n, p in self.named_parameters():
             # causal_knn's weights are side info a real decoder needs too (it's not named with
             # 'mlp' so it was previously skipped by this loop entirely -- silently free in every
@@ -842,23 +843,27 @@ class GaussianModel(nn.Module):
             if not ('mlp' in n or is_causal_knn):
                 continue
             # Only mlp_grid/mlp_deform/causal_knn (the entropy-prediction side info) are ever
-            # fake-quantized by quantize_mlps_()/quantize_mlps_fp16_()/quantize_mlps_fp8_();
-            # everything else (mlp_opacity/cov/color/featurebank/hyp) stays at the full `digit`
-            # (fp32) width.
-            # fp16/fp8 round-trip causal_knn too (see _entropy_side_info_modules), but the
-            # int-quant path (quantize_mlps_) only ever touches mlp_grid/mlp_deform -- keep its
-            # target set narrower so this doesn't under-report causal_knn as quantized when it
-            # was actually left at fp32.
-            is_fp_quant_target = is_causal_knn or 'mlp_grid' in n or 'mlp_deform' in n
-            is_int_quant_target = 'mlp_grid' in n or 'mlp_deform' in n
-            if is_fp8 and is_fp_quant_target:
+            # fake-quantized by quantize_mlps_()/quantize_mlps_fp16_()/quantize_mlps_fp8_()/
+            # quantize_mlps_fp4_(); everything else (mlp_opacity/cov/color/featurebank/hyp) stays
+            # at the full `digit` (fp32) width. All four quantization paths now share the same
+            # target set (_entropy_side_info_modules) so int vs float comparisons are apples to
+            # apples (same modules quantized either way).
+            is_quant_target = is_causal_knn or 'mlp_grid' in n or 'mlp_deform' in n
+            if is_fp8 and is_quant_target:
                 # True 8-bit float (e4m3/e5m2): no extra scale metadata needed, flat 8 bits/param.
                 mlp_size += p.numel()*8
-            elif is_fp16 and is_fp_quant_target:
+            elif is_fp4 and is_quant_target:
+                # 4-bit float (e2m1): needs the same per-output-channel scale as the int path
+                # (see quantize_mlps_fp4_ -- e2m1's raw range is too narrow for real weights
+                # without one), so charge that scale overhead too, not just the flat 4 bits/param.
+                mlp_size += p.numel()*4
+                if p.dim() >= 2:
+                    mlp_size += p.shape[0]*16
+            elif is_fp16 and is_quant_target:
                 # True IEEE half precision: no extra scale metadata needed, unlike the linear
                 # int quantization below, so it's a flat 16 bits/param (weights and biases).
                 mlp_size += p.numel()*16
-            elif quant_bits is not None and p.dim() >= 2 and is_int_quant_target:
+            elif quant_bits is not None and p.dim() >= 2 and is_quant_target:
                 mlp_size += p.numel()*quant_bits
                 # Per-output-channel scale overhead (fp16 per row) -- quantize_mlps_ uses one
                 # scale per out_feature row, not one per tensor, so this has to be counted too.
@@ -1102,11 +1107,11 @@ class GaussianModel(nn.Module):
                 print(f"[finetune_pruned_mlps_] iter {it+1}/{iters} rate_loss(bits)={total_loss_val:.1f}")
 
     def quantize_mlps_(self, bits=8):
-        """Post-training fake-quantizes (quantize then dequantize in place) mlp_grid's and
-        mlp_deform's weight matrices to `bits` via per-output-channel (per-row) symmetric linear
-        quantization. Biases/LayerNorms (1-D params) are left at full precision (negligible
-        parameter count). Mutates self in place; get_mlp_size() reflects the smaller size
-        afterward via self._mlp_quant_bits.
+        """Post-training fake-quantizes (quantize then dequantize in place) mlp_grid's,
+        mlp_deform's, and (if enabled) causal_knn's weight matrices to `bits` via per-output-
+        channel (per-row) symmetric linear quantization. Biases/LayerNorms (1-D params) are left
+        at full precision (negligible parameter count). Mutates self in place; get_mlp_size()
+        reflects the smaller size afterward via self._mlp_quant_bits.
 
         Per-*row* (not per-tensor) scale matters specifically for mlp_grid's final layer: it
         packs mean/scale/prob (50 rows each) together with mean_scaling/scale_scaling (only 6
@@ -1121,7 +1126,7 @@ class GaussianModel(nn.Module):
         qmax = 2 ** (bits - 1) - 1
         n_tensors = 0
         with torch.no_grad():
-            for m in [self.mlp_grid, self.mlp_deform]:
+            for m in self._entropy_side_info_modules():
                 for name, p in m.named_parameters():
                     if p.dim() >= 2:
                         # p: [out_features, in_features] for nn.Linear -- one scale per out row.
@@ -1130,7 +1135,8 @@ class GaussianModel(nn.Module):
                         q = torch.clamp(torch.round(p / safe_scale), -qmax, qmax)
                         p.copy_(torch.where(scale > 0, q * safe_scale, p))
                         n_tensors += 1
-        print(f"[quantize_mlps_] fake-quantized {n_tensors} weight matrices in mlp_grid/mlp_deform to {bits} bits (per-output-channel scale)")
+        print(f"[quantize_mlps_] fake-quantized {n_tensors} weight matrices in "
+              f"{', '.join(type(m).__name__ for m in self._entropy_side_info_modules())} to {bits} bits (per-output-channel scale)")
 
     def _entropy_side_info_modules(self):
         """mlp_grid/mlp_deform plus causal_knn (when enabled) -- every network whose weights are
@@ -1204,6 +1210,41 @@ class GaussianModel(nn.Module):
                     n_tensors += 1
         print(f"[quantize_mlps_fp8_] round-tripped {n_tensors} tensors through {fp8_variant} "
               f"({', '.join(type(m).__name__ for m in self._entropy_side_info_modules())})")
+
+    def quantize_mlps_fp4_(self):
+        """Post-training round-trips mlp_grid's, mlp_deform's, and (if enabled) causal_knn's
+        weight matrices through a 4-bit float representation (e2m1: 1 sign + 2 exponent + 1
+        mantissa bit, bias 1 -- the OCP MX/NVFP4 E2M1 layout). Unlike quantize_mlps_fp8_/_fp16_,
+        this needs a per-output-channel (per-row) scale first: e2m1's raw representable range is
+        only [1, 6] in magnitude (min_exp = -bias+1 = 0), while real weight matrices are
+        typically << 1 in magnitude -- casting them unscaled would flush nearly everything to the
+        same smallest representable value. Scaling each row so its largest weight lands at 6.0
+        (mirroring quantize_mlps_'s int path, and how real FP4 formats like NVFP4/MXFP4 are
+        always used with a block scale) is what makes this format usable at all. 1-D params
+        (biases/LayerNorms) skip scaling (negligible parameter count; direct e2m1 cast is fine
+        for them since get_mlp_size doesn't need to special-case a 1-row scale there).
+        get_mlp_size() charges 4 bits/param plus the same 16-bit-per-row scale overhead as the
+        int path. Expect a much larger quality hit than fp8 even so -- 2 mantissa values per
+        exponent (i.e. per row: {scale, 1.5xscale} x sign x {2^0..2^2}) is very coarse; this
+        exists to map out where the precision/size tradeoff actually breaks.
+        """
+        exp_bits, mant_bits, bias = 2, 1, 1
+        max_representable = 1.5 * (2.0 ** (2 ** exp_bits - 1 - bias))  # e2m1 -> 1.5 * 2^2 = 6.0
+        self._mlp_fp4 = True
+        n_tensors = 0
+        with torch.no_grad():
+            for m in self._entropy_side_info_modules():
+                for name, p in m.named_parameters():
+                    if p.dim() >= 2:
+                        scale = p.abs().amax(dim=1, keepdim=True) / max_representable
+                        safe_scale = torch.where(scale > 0, scale, torch.ones_like(scale))
+                        q = self._round_to_minifloat(p / safe_scale, exp_bits, mant_bits, bias)
+                        p.copy_(torch.where(scale > 0, q * safe_scale, p))
+                    else:
+                        p.copy_(self._round_to_minifloat(p, exp_bits, mant_bits, bias))
+                    n_tensors += 1
+        print(f"[quantize_mlps_fp4_] round-tripped {n_tensors} tensors through e2m1 fp4 "
+              f"(per-row scaled) ({', '.join(type(m).__name__ for m in self._entropy_side_info_modules())})")
 
     def eval(self):
         self.mlp_opacity.eval()
@@ -2226,9 +2267,19 @@ class GaussianModel(nn.Module):
             bit_anchor = len(compress_reno(_anchor_int_est, ckpt_path=self.reno_ckpt_path)) * 8
         else:
             bit_anchor = _anchor.shape[0]*3*anchor_round_digits
-        bit_feat = torch.sum(bit_feat).item()
-        bit_scaling = torch.sum(bit_scaling).item()
-        bit_offsets = torch.sum(bit_offsets).item()
+        # A handful of anchors (out of hundreds of thousands) occasionally land on a numerical
+        # cliff edge where the entropy model's predicted mean/scale/prob comes out NaN/Inf --
+        # observed on real trained checkpoints, sensitive to the exact quantized MLP weights
+        # (which anchors trip it isn't consistent across fp16/fp8/int8/etc, so it isn't simply
+        # "coarser quantization = more outliers"). torch.sum propagates a single NaN/Inf to the
+        # entire total, making the size estimate useless for the other 99.99%+ of anchors that
+        # are fine. Zeroing out just the non-finite contributions before summing is a
+        # conservative approximation (a real encoder still has to spend some bits on these
+        # anchors via whatever escape mechanism it uses) but keeps the aggregate usable instead
+        # of NaN.
+        bit_feat = torch.nan_to_num(bit_feat, nan=0.0, posinf=0.0, neginf=0.0).sum().item()
+        bit_scaling = torch.nan_to_num(bit_scaling, nan=0.0, posinf=0.0, neginf=0.0).sum().item()
+        bit_offsets = torch.nan_to_num(bit_offsets, nan=0.0, posinf=0.0, neginf=0.0).sum().item()
         if self.ste_binary:
             bit_hash = get_binary_vxl_size((hash_embeddings+1)/2)[1].item()
         else:

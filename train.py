@@ -348,7 +348,7 @@ def training(args_param, dataset, opt, pipe, dataset_name, testing_iterations, s
 
             # Log and save
             torch.cuda.synchronize(); t_start_log = time.time()
-            training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger, args_param.model_path, quantize_mlp_bits=args_param.quantize_mlp_bits, quantize_mlp_fp16=args_param.quantize_mlp_fp16, quantize_mlp_fp8=args_param.quantize_mlp_fp8, fp8_variant=args_param.fp8_variant, prune_mlp_ratio=args_param.prune_mlp_ratio, prune_finetune_iters=args_param.prune_finetune_iters, prune_finetune_lr=args_param.prune_finetune_lr, prune_finetune_lambda_q=args_param.prune_finetune_lambda_q)
+            training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger, args_param.model_path, quantize_mlp_bits=args_param.quantize_mlp_bits, quantize_mlp_fp16=args_param.quantize_mlp_fp16, quantize_mlp_fp8=args_param.quantize_mlp_fp8, quantize_mlp_fp4=args_param.quantize_mlp_fp4, fp8_variant=args_param.fp8_variant, prune_mlp_ratio=args_param.prune_mlp_ratio, prune_finetune_iters=args_param.prune_finetune_iters, prune_finetune_lr=args_param.prune_finetune_lr, prune_finetune_lambda_q=args_param.prune_finetune_lambda_q)
             if (iteration in saving_iterations):
                 logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -517,7 +517,7 @@ def prepare_output_and_logger(args):
     return tb_writer
 
 
-def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, wandb=None, logger=None, pre_path_name='', quantize_mlp_bits=0, quantize_mlp_fp16=False, quantize_mlp_fp8=False, fp8_variant='e4m3', prune_mlp_ratio=0.0, prune_finetune_iters=300, prune_finetune_lr=1e-4, prune_finetune_lambda_q=1000.0):
+def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, wandb=None, logger=None, pre_path_name='', quantize_mlp_bits=0, quantize_mlp_fp16=False, quantize_mlp_fp8=False, quantize_mlp_fp4=False, fp8_variant='e4m3', prune_mlp_ratio=0.0, prune_finetune_iters=300, prune_finetune_lr=1e-4, prune_finetune_lambda_q=1000.0):
     if tb_writer:
         tb_writer.add_scalar(f'{dataset_name}/train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar(f'{dataset_name}/train_loss_patches/total_loss', loss.item(), iteration)
@@ -550,6 +550,8 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
                     # PSNR/SSIM/LPIPS) consistently reflects the fp8 entropy MLPs, not a mix of
                     # fp32 compute with a fake smaller reported size.
                     scene.gaussians.quantize_mlps_fp8_(fp8_variant=fp8_variant)
+                elif quantize_mlp_fp4:
+                    scene.gaussians.quantize_mlps_fp4_()
                 elif quantize_mlp_fp16:
                     scene.gaussians.quantize_mlps_fp16_()
                 elif quantize_mlp_bits > 0:
@@ -897,7 +899,8 @@ if __name__ == "__main__":
     parser.add_argument('--use_3gmm', action='store_true', default=False, help="Use a 3-component Gaussian mixture (Entropy_gaussian_mix_prob_3) for feat's entropy model instead of the default 2-component mixture")
     parser.add_argument('--quantize_mlp_bits', type=int, default=0, help="If >0, post-training fake-quantize mlp_grid/mlp_deform weight matrices to this many bits before the final size/quality report (0 = disabled, keep fp32)")
     parser.add_argument('--quantize_mlp_fp16', action='store_true', default=False, help="Post-training round-trip mlp_grid/mlp_deform (and causal_knn, if enabled) parameters through true IEEE half precision (fp16) before the final size/quality report. Takes priority over --quantize_mlp_bits if both are set.")
-    parser.add_argument('--quantize_mlp_fp8', action='store_true', default=False, help="Post-training round-trip mlp_grid/mlp_deform (and causal_knn, if enabled) parameters through true 8-bit float (fp8) before the final size/quality report. Takes priority over --quantize_mlp_fp16 and --quantize_mlp_bits if multiple are set.")
+    parser.add_argument('--quantize_mlp_fp8', action='store_true', default=False, help="Post-training round-trip mlp_grid/mlp_deform (and causal_knn, if enabled) parameters through true 8-bit float (fp8) before the final size/quality report. Takes priority over --quantize_mlp_fp4, --quantize_mlp_fp16, and --quantize_mlp_bits if multiple are set.")
+    parser.add_argument('--quantize_mlp_fp4', action='store_true', default=False, help="Post-training round-trip mlp_grid/mlp_deform (and causal_knn, if enabled) weight matrices through a per-row-scaled 4-bit float (e2m1) before the final size/quality report. Takes priority over --quantize_mlp_fp16 and --quantize_mlp_bits if multiple are set (but not over --quantize_mlp_fp8).")
     parser.add_argument('--fp8_variant', type=str, default='e4m3', choices=['e4m3', 'e5m2'], help="Which 8-bit float format --quantize_mlp_fp8 uses: e4m3 (more mantissa, less range -- better for weight-scale tensors) or e5m2 (more range, less mantissa)")
     parser.add_argument('--prune_mlp_ratio', type=float, default=0.0, help="If >0, post-training structurally prune this fraction of GEGLU hidden units out of mlp_grid/mlp_deform (shrinks the actual matrices) before quantization/the final size/quality report (0 = disabled)")
     parser.add_argument('--prune_finetune_iters', type=int, default=300, help="Number of rate-loss-only fine-tuning steps applied to mlp_grid/mlp_deform right after structured pruning (0 = skip fine-tuning)")
