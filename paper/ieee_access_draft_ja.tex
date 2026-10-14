@@ -1,0 +1,502 @@
+\documentclass{ieeeaccess}
+\usepackage{cite}
+\usepackage{CJKutf8} % 日本語対応
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{booktabs}
+\usepackage{multirow}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+\history{Date of publication xxxx 00, 0000, date of current version xxxx 00, 0000.}
+\doi{10.1109/ACCESS.2017.DOI}
+
+\title{\begin{CJK}{UTF8}{min}
+学習型3Dガウシアンスプラッティング圧縮における\\
+エントロピー予測ネットワークの量子化幅に関する実証的研究
+\end{CJK}}
+
+\author{\uppercase{First A. Author}\authorrefmark{1},
+\uppercase{Second B. Author}\authorrefmark{1}}
+\address[1]{Affiliation name here (fill in your actual institution and contact e-mail before submission)}
+\tfootnote{\begin{CJK}{UTF8}{min}
+本研究は著者所属機関の支援を受けて実施された。（資金提供元があれば記載）
+\end{CJK}}
+
+\markboth
+{\begin{CJK}{UTF8}{min}著者ら: 学習型3DGS圧縮におけるエントロピー予測ネットワークの量子化幅に関する実証的研究\end{CJK}}
+{\begin{CJK}{UTF8}{min}著者ら: 学習型3DGS圧縮におけるエントロピー予測ネットワークの量子化幅に関する実証的研究\end{CJK}}
+
+\corresp{\begin{CJK}{UTF8}{min}Corresponding author: First A. Author (e-mail: author@example.ac.jp).\end{CJK}}
+
+\begin{abstract}
+\begin{CJK}{UTF8}{min}
+3D Gaussian Splatting（3DGS）は新規視点合成のための実時間レンダリング手法として急速に普及したが、その素朴な表現は非常に大きなストレージコストを伴う。HAC/HAC++系の圧縮手法は、ハッシュグリッド特徴とコンテキストモデルから予測される確率分布を用いてシーンパラメータ（アンカー特徴量・スケール・オフセット）を算術符号化することで高い圧縮率を達成している。しかし、この予測を担うMLP（\texttt{mlp\_grid}、\texttt{mlp\_deform}、コンテキスト集約モジュール）自体の重みも復号器に伝送する必要があり、この「エントロピー側情報」としてのMLP自体の符号化コストは、従来十分に調査されてこなかった。
+
+本研究では、これらエントロピー予測専用ネットワークに特化した量子化幅のアブレーション研究を行った。具体的には、重み表現をFP32（無量子化）からFP16・FP8・FP4へ、また整数表現をINT8からINT6・INT4・INT2へと幅を変化させ、5つのシーン・5点のレート歪みパラメータにわたり、Bjøntegaard Delta Rate（BD-Rate）を指標として系統的に比較した。その結果、8bit前後（INT8・INT6・FP8・FP16）までの量子化はレンダリング画質に一切影響を与えず、追加コストなしに総伝送サイズを6〜19\%削減する一方、4bit以下（INT4・FP4・INT2）では符号化コストの爆発的な増大により総サイズがむしろFP32よりも最大2倍以上に悪化するという、非単調（U字型）な関係を発見した。この崩壊は量子化誤差の絶対的な大きさではなく、系統的な丸めの偏り——特にfloat形式の指数部ビット不足に起因するダイナミックレンジの不足——によって引き起こされることを、実際の学習済み重み分布の直接測定によって定量的に明らかにした。この現象は独立に再学習した複数のモデルで一貫して再現され、特定の学習試行に固有の偶発的現象ではなく構造的な性質であることを確認した。
+
+さらに、アンカー位置の圧縮を担う学習型点群コーデックRENOの寄与を分離するアブレーションを行い、RENOを従来のG-PCCベースの符号化に置き換えた場合、5つのシーン全てでBD-Rateが17〜101ポイントという大幅な悪化を示すことを確認した。これは、MLP量子化幅の選択（最大でも数十ポイント規模）よりもRENOの採用そのものが圧縮性能に遥かに大きな影響を与えることを示している。
+\end{CJK}
+\end{abstract}
+
+\begin{keywords}
+\begin{CJK}{UTF8}{min}
+3D Gaussian Splatting, ニューラル圧縮, エントロピー符号化, ポストトレーニング量子化, 点群圧縮, 学習型コーデック, レート歪み最適化
+\end{CJK}
+\end{keywords}
+
+\titlepgskip=-15pt
+
+\maketitle
+
+\section{Introduction}
+\label{sec:introduction}
+\PARstart{3}{D} Gaussian Splatting
+\begin{CJK}{UTF8}{min}
+（3DGS）\cite{kerbl20233d}は、多数の異方性3Dガウシアンの集合によってシーンを表現し、タイルベースのラスタライゼーションによって実時間でのフォトリアリスティックな新規視点合成を可能にする手法として近年急速に普及した。一方で、高品質なシーンを再現するためには数百万個規模のガウシアンが必要となることが多く、各ガウシアンが位置・スケール・回転・不透明度・球面調和関数係数といった多数のパラメータを持つため、素朴な表現では数百メガバイトからギガバイト規模のストレージを要する。この膨大なストレージコストは、3DGSを実応用（モバイル端末への配信、ストリーミング、大規模シーンのアーカイブなど）に供する上での大きな障壁となっている。
+
+この問題に対し、Scaffold-GS\cite{lu2024scaffold}はシーンをアンカー点とそこから派生するオフセットという階層構造で表現することでガウシアン数自体を削減し、HAC\cite{chen2024hac}およびその発展形であるHAC++（本研究ではHAC-plusと呼ぶ）は、ハッシュグリッド特徴とコンテキストモデルから予測される確率分布を用いて、アンカーの特徴量・スケール・オフセットを算術符号化（arithmetic coding）することで、さらに高い圧縮率を達成している。また、アンカー自体の3次元位置の圧縮には、近年提案された学習型点群コーデックRENO\cite{reno}が統合されており、従来のG-PCC（MPEG点群圧縮標準）ベースの手法を上回る圧縮効率を実現している。
+
+これらの手法に共通する重要な性質として、エントロピー符号化に用いる確率分布（平均・スケール・混合比率など）を予測するMLP自体も、復号時に同一の予測を再現するために復号器側へ伝送する必要がある、という点が挙げられる。すなわち、これらのMLPは最終的なレンダリング結果には一切関与しない——実際に画素値を決定するのは別系統の不透明度・共分散・色予測ネットワークである——にもかかわらず、その重み自体が「エントロピー側情報（entropy side information）」として、符号化すべきデータの一部を構成している。したがって、これらのネットワークをどこまで小さく・低精度に量子化できるかは、全体の圧縮率に直接影響する重要な設計上の自由度でありながら、既存研究ではその探索が体系的に行われてこなかった。
+
+一般のニューラルネットワーク量子化（ポストトレーニング量子化、PTQ）に関する研究は、量子化対象のネットワークが直接タスクの出力（分類精度、生成画質など）を決定する設定を主に想定しており、量子化幅を下げるほど単調にタスク精度が劣化するという直感が広く共有されている。しかし、本研究が対象とするエントロピー予測ネットワークは、その出力がレンダリング画質を一切左右しない一方で、出力される確率分布の予測精度が実際の符号化コストを通じて総伝送サイズに非線形に影響するという、通常のPTQとは異なる力学を持つ。本研究は、この特有の設定における量子化幅の影響を、浮動小数点形式（FP32・FP16・FP8・FP4）と整数形式（INT8・INT6・INT4・INT2）の両面から系統的に調査するものである。
+
+本研究の主な貢献は以下の通りである。
+\begin{itemize}
+  \item HAC-plusのエントロピー予測ネットワーク（\texttt{mlp\_grid}、\texttt{mlp\_deform}、コンテキスト集約モジュール）に特化した量子化幅のアブレーション研究を、FP32からFP4、INT8からINT2まで8通りの構成・5シーン・5点のレート歪みパラメータにわたって実施し、Bjøntegaard Delta Rateによって定量評価した。
+  \item 8bit前後の量子化がほぼ無コストで圧縮率を改善する一方、4bit以下で総サイズがむしろ悪化するという非単調な関係を発見し、この崩壊が量子化誤差の大きさではなく、系統的な丸めの偏り（特にfloat形式のダイナミックレンジ不足）に起因することを、実際の重み分布の直接測定によって定量的に説明した。
+  \item アンカー位置圧縮を担う学習型コーデックRENOの寄与を分離するアブレーションを行い、RENOの採用がMLP量子化幅の選択よりも遥かに大きく全体の圧縮性能を左右することを、5シーンにわたって一貫して確認した。
+\end{itemize}
+\end{CJK}
+
+\section{Related Work}
+\begin{CJK}{UTF8}{min}
+
+\subsection{3D Gaussian Splattingとそのシーン圧縮}
+3D Gaussian Splatting\cite{kerbl20233d}は、点ベースの微分可能レンダリングを用いて、NeRF系手法に匹敵する画質を大幅に高速な学習・レンダリング速度で達成する手法として提案された。その後、ガウシアン数の爆発的な増加によるストレージコストを抑制するため、複数の圧縮・構造化アプローチが提案されている。Scaffold-GS\cite{lu2024scaffold}は、シーンをスパースなアンカー点の集合として表現し、各アンカーから複数のニューラルガウシアンをMLPによって動的に生成することで、冗長なガウシアンの削減とレンダリング品質の両立を図った。HAC\cite{chen2024hac}はScaffold-GSのアンカー構造を基盤としつつ、Instant-NGP\cite{muller2022instant}に由来するマルチ解像度ハッシュグリッドから得られる特徴量を文脈情報として、アンカーの各属性（特徴量・スケール・オフセット）の確率分布をMLPで予測し、算術符号化によって圧縮するという枠組みを導入した。本研究で基盤とするHAC-plus（HAC++\cite{chen2025hacpp}）は、この枠組みに対し、(i) モートン順序に基づく前方参照のみの因果的K近傍文脈集約（\texttt{causal\_knn}）、(ii) スケール・オフセットという複数のアンカー属性による段階的なFiLM条件付け正規化（\texttt{AnchorCondNorm}）、(iii) マルチ解像度ハッシュグリッドの各解像度レベルの寄与をSE-Net型MLPで明示的に調整するレベルゲーティング（\texttt{LevelSEGate}）、を追加し、さらに圧縮率を改善したものである。これら3つの機構の詳細はSection~\ref{sec:causal-knn}--\ref{sec:level-se-gate}で述べる。
+
+HAC・HAC++自体を直接の基盤として、そのアーキテクチャを拡張する形で提案された派生手法も存在する。PCGS\cite{chen2025pcgs}（2025年、HAC++の原著者らによる）は、HAC++に段階的（progressive）な符号化能力を付加し、単一の学習済みモデルから伝送帯域に応じて複数のレート点を選択可能にした。また、SymGS\cite{gupta2025symgs}（2025年）は、GS内に存在する局所的な対称性を検出し、HACに対する「プラグアンドプレイ」な拡張として統合する手法を提案している。これらはHAC/HAC++のアーキテクチャそのものを拡張する直接的な派生であり、後述するContextGS・CompGS・CAT-3DGS・Yuらの手法のような、HACと類似の設計思想（アンカー属性の確率分布予測＋算術符号化）を独立に採用した手法とは区別される。
+
+HACの系譜以外にも、多様なアプローチによる3DGS圧縮手法が提案されている。コードブックに基づくベクトル量子化を用いる手法として、Lee ら\cite{lee2024compact}・Niedermayrら\cite{niedermayr2024compressed}（Compressed3D）・Navaneetら\cite{navaneet2024compact3d}（Compact3D）・EAGLES\cite{girish2024eagles}・LightGaussian\cite{fan2024lightgaussian}が挙げられる。Reduced3DGS\cite{papantonakis2024reduced3dgs}はプルーニングと球面調和関数次数の適応的削減を組み合わせ、SOG\cite{morgenstern2024sog}はガウシアン属性を2次元グリッドへ空間的局所性を保ったまま並べ替え、標準的な画像コーデックで圧縮する。RDOGaussian\cite{wang2024rdogaussian}はプルーニングとエントロピー制約付きベクトル量子化をレート歪み最適化として一体で学習し、MesonGS\cite{xie2024mesongs}は属性変換に基づく学習後（post-training）圧縮を行う。
+
+一方、HACと同様にアンカー（またはガウシアン）属性の確率分布を予測し算術符号化するエントロピー符号化ベースの手法も複数提案されている。ContextGS\cite{wang2024contextgs}は、アンカーを複数の階層レベルに分割し、粗いレベルで既に符号化されたアンカーの情報を文脈として、より細かいレベルのアンカーの確率分布を予測する自己回帰的な階層的文脈モデルを導入した。CompGS\cite{liu2024compgs}は、少数のアンカープリミティブから残りのプリミティブを予測するハイブリッド構造とレート制約付き最適化を組み合わせている。さらに最新の手法として、CAT-3DGS\cite{zhan2025cat3dgs}（ICLR 2025）は、ガウシアンの主軸方向に向けたマルチスケールのトライプレーン上で空間的・チャネル方向の自己回帰的文脈符号化を行い、HAC++を上回るレート歪み性能を報告している。2026年には、Yuら\cite{yu2026practical}が、空間集約を介さずアンカー座標から得た幾何文脈のみで（線形変換と活性化関数のみから成る軽量な）文脈モデルを構成する手法を提案し、HAC++を含む既存手法よりも有利なレート歪み性能を報告している。
+
+また、GS属性を2次元平面や画像・映像フレームへ射影し、標準的な画像・動画コーデックで圧縮するアプローチも提案されている。Leeら\cite{lee2025codecgs}（ICCV 2025）は、特徴平面（feature planes）を周波数領域でエントロピーモデリングした上で、標準動画コーデックHEVCによって符号化する手法を提案した。2026年にはMartinら\cite{martin2026structured}が、GSパラメータを画像として構造化し、標準的な画像コーデックで符号化する手法を提案している。これらの手法は、学習可能な確率分布予測モデルの代わりに、既存の標準化された画像・動画コーデックの持つ高度に最適化されたエントロピー符号化器を再利用する点で、HACの系譜とは異なるアプローチを取る。
+
+本研究で対象とするHAC-plusのエントロピー予測ネットワーク（\texttt{mlp\_grid}・\texttt{mlp\_deform}・\texttt{causal\_knn}）に特化した量子化幅のアブレーションは、これら既存のエントロピー符号化手法・動画/画像コーデック利用手法とも独立に適用可能な設計軸であると考えられる。
+
+表\ref{tab:literature}に、3DGS・Scaffold-GSおよび既存の代表的な3DGS圧縮手法の原論文が報告しているTanks and Templesデータセット平均値を示す。3DGS・Scaffold-GS・HAC・HAC++・Lee ら・Compressed3D・EAGLES・LightGaussian・SOG・Navaneetら・Reduced3DGS・RDOGaussian・MesonGS-FT・CompGSの数値は\cite{chen2025hacpp}のTable~IIより引用し、ContextGSは\cite{wang2024contextgs}のTable~1、CAT-3DGSは\cite{zhan2025cat3dgs}のTable~6、Yuらの手法は\cite{yu2026practical}のTable~13、Leeら（CodecGS）は\cite{lee2025codecgs}のTable~7、PCGSは\cite{chen2025pcgs}の補足資料Table~I、SymGSは\cite{gupta2025symgs}のTable~1より引用した。これらは各手法独自の学習設定・評価プロトコルに基づく数値であり、本研究の表\ref{tab:quant-sweep}--\ref{tab:reno-ablation}に示すBD-Rate（縮小アーキテクチャ・RENO統合・5点の$\lambda$スイープという本研究独自の設定に基づく）と直接比較できるものではない。そこで、本研究が基盤とする（量子化・アーキテクチャ縮小を適用する前の）HAC-plusについてのみ、原論文の報告値ではなく、本研究の実験環境で実際に学習・測定した値（\texttt{truck}・\texttt{train}シーンの平均、$\lambda=0.001$を高レート点、$\lambda=0.005$を低レート点とする）を同表最下段に示す。本研究が基盤とするHAC-plusが、3DGSに対して50倍以上、Scaffold-GSに対しても10倍以上の圧縮率を達成する手法群の延長線上に位置することが確認できる。
+
+\begin{table}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{代表的な3DGS圧縮手法との比較（Tanks and Temples平均）}
+\label{tab:literature}
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+手法 & サイズ (MB) & PSNR & SSIM & LPIPS \\
+\midrule
+3DGS\cite{kerbl20233d}（原論文報告値） & 431.0 & 23.69 & 0.844 & 0.178 \\
+Scaffold-GS\cite{lu2024scaffold}（原論文報告値） & 86.50 & 23.96 & 0.853 & 0.177 \\
+\multicolumn{5}{l}{\textit{コードブック・ベクトル量子化／プルーニング系}} \\
+Lee ら\cite{lee2024compact}（原論文報告値） & 39.43 & 23.32 & 0.831 & 0.201 \\
+Compressed3D\cite{niedermayr2024compressed}（原論文報告値） & 17.28 & 23.32 & 0.832 & 0.194 \\
+EAGLES\cite{girish2024eagles}（原論文報告値） & 28.99 & 23.28 & 0.835 & 0.203 \\
+LightGaussian\cite{fan2024lightgaussian}（原論文報告値） & 22.43 & 22.83 & 0.822 & 0.242 \\
+SOG\cite{morgenstern2024sog}（原論文報告値） & 9.30 & 23.15 & 0.828 & 0.198 \\
+Navaneetら\cite{navaneet2024compact3d}（原論文報告値） & 12.50 & 23.44 & 0.838 & 0.198 \\
+Reduced3DGS\cite{papantonakis2024reduced3dgs}（原論文報告値） & 14.00 & 23.57 & 0.840 & 0.188 \\
+RDOGaussian\cite{wang2024rdogaussian}（原論文報告値） & 12.03 & 23.34 & 0.835 & 0.195 \\
+MesonGS-FT\cite{xie2024mesongs}（原論文報告値） & 16.99 & 23.32 & 0.837 & 0.193 \\
+\multicolumn{5}{l}{\textit{エントロピー符号化（確率分布予測＋算術符号化）系}} \\
+HAC\cite{chen2024hac}（原論文報告値、lowrate） & 8.10 & 24.04 & 0.846 & 0.187 \\
+HAC\cite{chen2024hac}（原論文報告値、highrate） & 11.24 & 24.40 & 0.853 & 0.177 \\
+CompGS\cite{liu2024compgs}（原論文報告値、lowrate） & 5.89 & 23.11 & 0.815 & 0.236 \\
+CompGS\cite{liu2024compgs}（原論文報告値、highrate） & 9.60 & 23.70 & 0.837 & 0.208 \\
+ContextGS\cite{wang2024contextgs}（原論文報告値、lowrate） & 7.05 & 24.20 & 0.852 & 0.184 \\
+ContextGS\cite{wang2024contextgs}（原論文報告値、highrate） & 11.80 & 24.29 & 0.855 & 0.176 \\
+HAC++\cite{chen2025hacpp}（原論文報告値、lowrate） & 5.18 & 24.22 & 0.849 & 0.190 \\
+HAC++\cite{chen2025hacpp}（原論文報告値、highrate） & 8.63 & 24.32 & 0.854 & 0.178 \\
+\multicolumn{5}{l}{\textit{HAC/HAC++直接派生系}} \\
+PCGS\cite{chen2025pcgs}（原論文報告値、lowrate） & 5.67 & 24.50 & 0.852 & 0.186 \\
+PCGS\cite{chen2025pcgs}（原論文報告値、highrate） & 9.87 & 24.59 & 0.856 & 0.181 \\
+SymGS\cite{gupta2025symgs}（原論文報告値、T\&T 2シーン平均、SSIM/LPIPS未報告） & 7.14 & 24.02 & -- & -- \\
+CAT-3DGS\cite{zhan2025cat3dgs}（原論文報告値、lowrate） & 1.42 & 22.97 & 0.786 & 0.293 \\
+CAT-3DGS\cite{zhan2025cat3dgs}（原論文報告値、highrate） & 6.93 & 24.41 & 0.853 & 0.189 \\
+Yuら\cite{yu2026practical}（原論文報告値、2026、lowrate） & 1.64 & 23.86 & 0.830 & 0.229 \\
+Yuら\cite{yu2026practical}（原論文報告値、2026、highrate） & 5.01 & 24.50 & 0.857 & 0.177 \\
+\multicolumn{5}{l}{\textit{標準画像／動画コーデック利用系}} \\
+Leeら\cite{lee2025codecgs}（CodecGS、原論文報告値、HEVC使用） & 7.46 & 23.63 & 0.842 & 0.192 \\
+\midrule
+HAC-plus（本研究、実測、lowrate） & 4.22 & 24.13 & -- & -- \\
+HAC-plus（本研究、実測、highrate） & 8.49 & 24.32 & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{学習型点群圧縮とRENO}
+アンカーの3次元位置そのものの圧縮には、従来はMPEGの点群圧縮標準であるG-PCC（tmc3実装）\cite{gpcc}が広く用いられてきたが、近年、点群の空間構造に特化したニューラルネットワークによる学習型コーデックが、G-PCCを上回る圧縮効率を示すことが報告されている。RENO\cite{reno}はそのような学習型点群コーデックの一つであり、本研究で対象とするHAC-plusのパイプラインには、アンカー位置圧縮用のコーデックとしてRENOが統合されている。本研究では、このRENOの有無が全体の圧縮性能に与える寄与を、MLP量子化幅の選択という別の設計軸から分離して評価する。
+
+\subsection{ニューラルネットワークのポストトレーニング量子化}
+ポストトレーニング量子化（PTQ）は、学習済みネットワークの重みを低精度表現に変換することで、モデルサイズと推論コストを削減する手法として広く研究されている。整数（INT）量子化では、テンソルまたはチャネルごとのスケール係数を用いた線形量子化が標準的であり、8bit程度までは精度劣化が小さいことが広く報告されている。一方、近年ではFP8（E4M3・E5M2）やFP4（E2M1など）といった低ビット浮動小数点（minifloat）形式が、大規模言語モデルの学習・推論高速化の文脈で注目されており、NVIDIAのTransformer EngineやOCP（Open Compute Project）のMXフォーマット仕様\cite{ocp_mx}などで標準化が進んでいる。これらのminifloat形式は、通常ブロック単位のスケーリング係数と組み合わせて使用される。
+
+しかし、既存のPTQ研究の大半は、量子化対象のネットワークがタスクの最終出力（分類ロジット、生成画像など）を直接決定する設定を想定しており、量子化対象が「別のデータを圧縮するための確率分布予測器」であり、かつその出力がタスク本体の結果（本研究の文脈ではレンダリング画質）に一切影響しないという、本研究が対象とする設定における量子化幅の影響は、我々の知る限り系統的に調査されていない。
+\end{CJK}
+
+\section{Method}
+\begin{CJK}{UTF8}{min}
+
+\subsection{基盤アーキテクチャ}
+本研究は、HAC-plusのcausal K近傍文脈モジュールを有効化した構成を基盤とする。具体的には、コンテキスト集約の近傍数を$K=8$、コンテキスト集約モジュール（\texttt{causal\_knn}）および格子特徴予測MLP（\texttt{mlp\_grid}）の隠れ層幅をそれぞれ標準構成の$1/4$・$1/2$に縮小した構成（\texttt{causal\_knn\_hidden\_mult}=2, \texttt{mlp\_grid\_hidden\_mult}=4）を用いる。これは、先行する予備実験において、この縮小構成がBD-Rateの観点で標準構成と同等以上の性能を示したことに基づく選択である。アンカー位置の圧縮には、特記しない限り学習型コーデックRENOを使用する。
+
+\subsection{因果的アンカー近傍集約（causal\_knn）}
+\label{sec:causal-knn}
+HAC-plusの各アンカーは、ハッシュグリッドからの補間特徴量に加えて、近傍アンカーの情報を集約した文脈ベクトルを用いてエントロピー予測の精度を高める。この近傍集約には、復号時の整合性という制約から、通常の（双方向の）K近傍ではなく\emph{因果的}（causal）なK近傍集約が用いられる。
+
+具体的には、全アンカーをモートン順序（Morton order、ボクセル化した整数座標のビットインターリーブに基づくZ-order curve）で並び替え、各アンカーについて、このモートン順序上で\emph{自分より前に位置するアンカーのみ}から実際の3次元距離に基づく$K$近傍（本研究では$K=8$）を探索し、温度付きソフトマックス重み
+\begin{equation}
+w_k = \frac{\exp(-d_k / \tau)}{\sum_{k'=1}^{K} \exp(-d_{k'} / \tau)}
+\end{equation}
+（$d_k$は$k$番目の近傍までの距離、$\tau$は学習可能な温度パラメータ）によって近傍特徴量を集約する。計算量削減のため実装上はチャンク単位で処理し、チャンク内では上三角マスクによって自分自身および後続アンカーを除外し、チャンク境界をまたぐ参照には直前の最大\texttt{max\_lookback}件（本研究では3000件）のみを参照するクロスチャンク近傍探索を併用する。
+
+この「過去のみを参照する」という制約は、本手法が復号可能であるための本質的な要件である。エントロピー復号は、符号化時と同一のモートン順序に従って逐次的に行われるため、あるアンカーの文脈ベクトルの計算に、まだ復号されていない後続アンカーの情報を用いることはできない。因果的な設計により、復号器は各アンカーを復号する時点で、その文脈計算に必要な全ての近傍アンカーが既に復号済みであることが保証される。
+
+得られた因果文脈ベクトル$c$は、ハッシュグリッド補間特徴$h$と連結した上で、残差補正ネットワーク（\texttt{correction}、3層のGEGLU活性化付きMLP）に通し、
+\begin{equation}
+h' = h + \mathrm{correction}\big([\,\mathrm{LayerNorm}(h),\, c\,]\big)
+\end{equation}
+として融合する。本研究で量子化対象とする\texttt{causal\_knn}モジュールの重みは、この\texttt{correction}ネットワークである。
+
+\subsection{複数属性によるFiLM条件付け（AnchorCondNorm）}
+\label{sec:anchor-cond-norm}
+HAC-plusは、各アンカーが持つ複数の属性——3次元位置に加えてスケール（\texttt{scaling}）とオフセット（\texttt{offset}）——を、ハッシュグリッド特徴に対するFiLM（Feature-wise Linear Modulation）条件付けを通じて段階的に取り込む\texttt{AnchorCondNorm}モジュールを備える。ハッシュグリッド補間特徴$h$に対し、
+\begin{equation}
+h_1 = (1+\gamma_s)\odot\mathrm{LN}(h) + \beta_s,\quad (\gamma_s,\beta_s) = \mathrm{MLP}_s(\mathrm{scale})
+\end{equation}
+\begin{equation}
+h_2 = (1+\gamma_o)\odot\mathrm{LN}(h_1) + \beta_o,\quad (\gamma_o,\beta_o) = \mathrm{MLP}_o(\mathrm{offset})
+\end{equation}
+のように、スケール属性・オフセット属性それぞれから予測したアフィン変調係数（$\gamma,\beta$）を用いて、正規化後の特徴に逐次的に適用する（各MLPはGEGLU活性化を伴う2層構成）。
+
+この複数属性条件付けは、2段階の因果的エントロピー予測パイプラインとして運用される。第1段階では、スケール属性・オフセット属性による条件付けを行わない（恒等変換の）文脈から、スケールとオフセット自身の確率分布を予測・量子化する。第2段階では、こうして得られた（量子化済みの）スケール・オフセット値を用いて\texttt{AnchorCondNorm}による条件付けを行い、この属性認識文脈を格子特徴（\texttt{feat}）の確率分布予測に用いる。この順序は偶然ではなく、スケール・オフセットは符号化ストリーム上で特徴量より先に符号化・復号されるため、特徴量の予測時点では両属性の値が復号器側でも既知であるという整合性を保っている。すなわち、単一の属性（位置）のみに基づく条件付けと比較して、復号時に利用可能な複数の属性情報を段階的に活用することで、各属性の確率分布予測の精度を高めている。
+
+\subsection{ハッシュグリッド内の解像度レベルゲーティング（LevelSEGate）}
+\label{sec:level-se-gate}
+マルチ解像度ハッシュグリッド符号化\cite{muller2022instant}は、複数の解像度レベルそれぞれから得た特徴ベクトルを単純に連結して出力とするのが一般的だが、この連結は各レベルが「どの位置の・どの解像度の特徴か」という情報を後段のMLPに対して重みの列位置を通じてのみ暗黙的に伝えるに過ぎない。HAC-plusでは、この連結の直前に\texttt{LevelSEGate}と呼ぶ軽量なSE-Net（Squeeze-and-Excitation）型のゲーティングMLPを挿入し、各解像度レベルの寄与を明示的に調整する。
+
+具体的には、各レベル$\ell$の特徴ベクトルをチャンネル方向に平均した値（content-dependent な「squeeze」）と、各レベルの（学習対象ではない、固定の）対数解像度を連結した$2L$次元ベクトル（$L$はレベル数）を入力とし、2層MLP（\texttt{Linear}$\to$\texttt{ReLU}$\to$\texttt{Linear}）とシグモイド関数によって、レベルごとのゲート値$g_\ell \in (0,1)$を算出する。各レベルの特徴は、連結される前にこのゲート値で再スケーリングされる。出力層の重みをゼロ初期化し、バイアスを2.0に初期化することで、学習開始時点ではほぼ恒等変換（全レベルのゲート値が入力に依存せず約0.88）となるよう設計されており、学習を通じて必要な場合にのみ特定のレベル（例えば局所的に異常に活性化した高解像度レベル）を相対的に抑制するよう調整される。このゲーティングMLPは、3次元ハッシュグリッド（\texttt{encoding\_xyz}）および3つの直交2次元平面グリッド（\texttt{encoding\_xy}、\texttt{encoding\_xz}、\texttt{encoding\_yz}）それぞれに対して独立に適用される。
+
+なお、本研究の量子化アブレーションでは、この\texttt{LevelSEGate}自体は量子化対象には含めていない（パラメータ数が小さく、符号化に必要な総伝送サイズへの寄与が他のエントロピー側情報ネットワークと比較して小さいため）。
+
+\subsection{量子化対象と評価設計}
+本研究で量子化の対象とするのは、エントロピー符号化の確率分布（平均・スケール・混合比率、および量子化ステップ幅の適応的調整項）を予測する3つのネットワーク——格子特徴予測MLP（\texttt{mlp\_grid}）、変形予測MLP（\texttt{mlp\_deform}）、および\ref{sec:causal-knn}節で述べたcausal K近傍文脈集約モジュール（\texttt{causal\_knn}）——である。これらは総称して「エントロピー側情報ネットワーク」と呼ぶ。対照的に、不透明度・共分散・色を予測するMLP（\texttt{mlp\_opacity}、\texttt{mlp\_cov}、\texttt{mlp\_color}）、および\ref{sec:anchor-cond-norm}節の\texttt{AnchorCondNorm}・\ref{sec:level-se-gate}節の\texttt{LevelSEGate}は本研究の量子化対象外であり、常にFP32精度を保持する。前者（レンダリング系MLP）が量子化対象外であることにより、量子化による影響はレンダリング画質（PSNR・SSIM・LPIPS）には一切波及せず、符号化に必要な総伝送サイズのみに現れるという、本研究の評価設計上重要な性質が保証される。
+
+表\ref{tab:param-count}に、量子化対象とする3ネットワークのパラメータ数を示す（縮小アーキテクチャ構成、\texttt{truck}シーン）。参考として、\ref{sec:level-se-gate}節で述べた量子化対象外の\texttt{LevelSEGate}（4種のハッシュグリッド分の合計）のパラメータ数も併記する——量子化対象の3ネットワークと比較して2桁以上小さく、これが同モジュールを量子化対象から除外した理由である。
+
+\begin{table}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{エントロピー側情報ネットワークのパラメータ数}
+\label{tab:param-count}
+\centering
+\begin{tabular}{lrc}
+\toprule
+モジュール & パラメータ数 & 量子化対象 \\
+\midrule
+\texttt{mlp\_grid} & 82{,}525 & 対象 \\
+\texttt{mlp\_deform} & 213{,}750 & 対象 \\
+\texttt{causal\_knn} (correction) & 65{,}953 & 対象 \\
+\midrule
+合計（量子化対象） & 362{,}228 & -- \\
+\midrule
+\texttt{LevelSEGate}（参考・対象外） & 402 & 対象外（常にFP32） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+図\ref{fig:architecture}に、以上で述べたエントロピー側情報ネットワーク群とRENOを含む、HAC-plusの全体パイプラインを示す。因果的KNN文脈集約（\texttt{causal\_knn}）・格子特徴予測MLP（\texttt{mlp\_grid}）・変形予測MLP（\texttt{mlp\_deform}）が本研究の量子化対象（赤）であり、ハッシュグリッド符号化・\texttt{LevelSEGate}・\texttt{AnchorCondNorm}は常にFP32を保持する（灰色）。アンカー位置の圧縮を担うRENO（青緑）は、MLP量子化幅とは独立な別のアブレーション軸として扱う。
+
+\Figure[t!](topskip=0pt,midskip=5pt,botskip=0pt)[width=\columnwidth]{figures/fig_architecture.pdf}{HAC-plusのエントロピー予測パイプライン全体図\label{fig:architecture}}
+
+\subsection{量子化スキーム}
+エントロピー側情報ネットワークの各重み行列に対し、学習完了後に以下のいずれかの量子化を一括適用し、レート・画質を再評価する。
+
+\textbf{整数量子化（INT$b$）：} 出力チャネル（行）ごとに対称线形量子化を行う。重み行列$W \in \mathbb{R}^{m \times n}$の第$i$行について、スケール$s_i = \max_j |W_{ij}| / q_{\max}$（$q_{\max}=2^{b-1}-1$）を求め、
+\begin{equation}
+\hat{W}_{ij} = s_i \cdot \mathrm{clip}\left(\mathrm{round}\left(\frac{W_{ij}}{s_i}\right), -q_{\max}, q_{\max}\right)
+\end{equation}
+により量子化・逆量子化を行う。本研究では$b \in \{8, 6, 4, 2\}$を評価した。行ごとのスケール係数は追加の側情報として16bit/行のコストを計上する。
+
+\textbf{浮動小数点量子化（FP$b$）：} IEEE半精度（FP16、$b=16$）はPyTorchのネイティブ実装による単純な丸め込みを用いる。FP8（E4M3形式、符号1bit・指数4bit・仮数3bit、バイアス7）およびFP4（E2M1形式、符号1bit・指数2bit・仮数1bit、バイアス1）は、学習環境のPyTorchバージョンがネイティブなFP8/FP4型を提供しないため、任意の指数部・仮数部ビット数に対応する汎用minifloat丸め込み関数を実装して用いた。値$x$に対し、指数$e = \mathrm{clip}(\lfloor \log_2 |x| \rfloor,\, -\mathrm{bias}+1,\, 2^{\mathrm{ebits}}-1-\mathrm{bias})$を求め、仮数部を$2^{-\mathrm{mbits}}$刻みで最近接丸めする。FP8はこのままの範囲（最小表現可能絶対値$2^{-6}\approx0.0156$、最大$480$、ダイナミックレンジ約30{,}720倍）で直接丸め込みを行うが、FP4は表現可能範囲が$[1.0, 6.0]$（ダイナミックレンジわずか6倍）と極めて狭いため、INT量子化と同様の行ごとのスケーリング（最大値を6.0に正規化）を併用しなければ実質的に機能しない。
+
+\subsection{評価プロトコル}
+各構成について、レート歪みトレードオフを制御するパラメータ$\lambda \in \{0.001, 0.002, 0.003, 0.004, 0.005\}$の5点で学習（各30{,}000イテレーション）を行い、量子化前（FP32）の学習済みチェックポイントに対して、学習後（ポストトレーニング）に各量子化スキームを一括適用し、総伝送サイズとPSNR/SSIM/LPIPSを再評価した。量子化はチェックポイントの重みをその場で書き換える処理であり、学習全体を量子化スキームごとに繰り返す必要がないため、1シーン・1$\lambda$あたり1回の学習から全ての量子化バリアントを評価できる。
+
+性能指標にはBjøntegaard Delta Rate（BD-Rate）\cite{bjontegaard2001}を用いる。各手法について得られた5点の(レート, PSNR)対に対し、レートの対数（$\log_{10}$）とPSNRの関係をPCHIP（区分的3次エルミート補間）で補間し、比較対象2曲線が共通して覆うPSNR区間において、基準手法（無修正のHAC-plus）に対する相対的なレートの増減をBD-Rate（\%）として算出する。BD-Rateが負であれば、同一画質における伝送サイズが基準手法より小さい（圧縮性能が改善している）ことを意味する。
+
+\subsection{データセットとRENOアブレーション}
+評価には、Tanks and Temples\cite{knapitsch2017tanks}データセットより\texttt{truck}・\texttt{train}、Deep Blending\cite{hedman2018deep}データセットより\texttt{drjohnson}・\texttt{playroom}、および合成データセットNeRF Synthetic\cite{mildenhall2020nerf}より\texttt{hotdog}の計5シーンを用いた。
+
+RENOの寄与を分離するため、上記と同一のアーキテクチャ・学習設定のまま、アンカー位置の圧縮コーデックのみをRENOからG-PCC（tmc3リファレンス実装）に置き換えた構成でも、同一の5点の$\lambda$について学習・評価を行った（ただし\texttt{hotdog}についてはRENO無効構成のみを実施）。
+\end{CJK}
+
+\section{Result}
+\begin{CJK}{UTF8}{min}
+
+\subsection{量子化幅スイープ（truck）}
+表\ref{tab:quant-sweep}に、\texttt{truck}シーンにおける8通りの量子化構成のBD-Rate（基準：無修正HAC-plus）を示す。
+
+\begin{table}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{truckシーンにおける量子化幅とBD-Rateの関係}
+\label{tab:quant-sweep}
+\centering
+\begin{tabular}{lr}
+\toprule
+量子化構成 & BD-Rate (\%) \\
+\midrule
+FP32（無量子化） & $-2.23$ \\
+FP16 & $-12.60$ \\
+FP8 (E4M3) & $-14.35$ \\
+\textbf{INT8} & $\mathbf{-17.34}$ \\
+INT6 & $-16.72$ \\
+INT4 & $+10.94$ \\
+FP4 (E2M1) & $+161.04$ \\
+INT2 & $+230.58$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+いずれの構成においても、レンダリング画質（PSNR・SSIM・LPIPS）は完全に同一の値を示した。これは、量子化対象のMLPがレンダリング経路に一切関与しないという設計上当然の結果であり、量子化の影響は総伝送サイズのみに現れることが確認された。図\ref{fig:render-comparison}に、\texttt{truck}シーン（$\lambda=0.001$）の同一テストビューに対するFP32・INT8・FP4それぞれの実際のレンダリング画像を示す——3者は画素単位で完全に一致しており（最大絶対差$0$）、伝送サイズが$10.91$MBから$9.92$MB（INT8）・$26.78$MB（FP4）へと変化する一方で、レンダリング結果そのものは一切変化しないことを視覚的に確認できる。
+
+\Figure[t!](topskip=0pt,midskip=5pt,botskip=0pt)[width=\columnwidth]{figures/fig_render_comparison.pdf}{同一テストビューのレンダリング結果比較（\texttt{truck}、$\lambda=0.001$）\label{fig:render-comparison}}
+
+8bit前後の構成（FP16・FP8・INT8・INT6）は、いずれも基準手法に対して6〜19\%の改善を示し、中でもINT8が全構成中最良の$-17.34\%$を達成した。一方、4bit以下の構成（INT4・FP4・INT2）では、BD-Rateが正の値——すなわち基準手法よりも伝送サイズが悪化する——に転じ、特にFP4は$+161.04\%$、INT2は$+230.58\%$という著しい悪化を示した。図\ref{fig:quant-bdrate}に表\ref{tab:quant-sweep}と同じ8構成のBD-Rateを図示する——量子化幅を狭めるほど単調に改善する訳ではなく、8bit付近を底とするU字型の非単調な関係が明確に見てとれる。
+
+\Figure[t!](topskip=0pt,midskip=5pt,botskip=0pt)[width=\columnwidth]{figures/fig_quant_width_bdrate.pdf}{量子化幅とBD-Rateの関係（\texttt{truck}）\label{fig:quant-bdrate}}
+
+\subsection{非単調な関係の要因}
+総伝送サイズは、量子化されたMLP自体の重みサイズと、そのMLPの予測精度に依存するfeat/scaling/offsetsの実際の符号化コストの和である。前者は量子化ビット数を減らせば単調に減少するが、後者はMLPの予測精度が一定の閾値を下回ると急激に増大する。これは、算術符号化が予測された確率分布の分散を過小評価した場合、実際のデータの符号化コストが二次関数的に増大するという、エントロピー符号化に特有の性質に起因する。内訳を分析したところ、この悪化の大部分は格子特徴（feat）の符号化コストの増大によるものであり、例えば$\lambda=0.001$の場合、FP32では4.27MBであったfeatの符号化コストが、FP4では18.69MBへと4倍以上に増大していた。図\ref{fig:rd-curves}に、\texttt{truck}シーンにおける基準手法・FP32・INT8・FP4それぞれのレート歪み曲線を示す——INT8は基準手法を一貫して上回る一方、FP4は同程度のPSNRを得るために大幅に大きな伝送サイズを要し、曲線全体が右方向へシフトしていることが見てとれる。
+
+\Figure[t!](topskip=0pt,midskip=5pt,botskip=0pt)[width=\columnwidth]{figures/fig_rd_curves.pdf}{レート歪み曲線の比較（\texttt{truck}）\label{fig:rd-curves}}
+
+\subsection{INT4とFP4の比較：誤差の偏りの検証}
+同一の4bit幅でありながらINT4（BD-Rate $+10.94\%$）とFP4（$+161.04\%$）の間に生じた著しい性能差の要因を、実際に学習済みの重みに対して量子化を適用し、定量的に分析した。格子特徴予測MLPの出力層の重みに対する1重みあたりの中央値相対誤差は、INT4で11.6\%、FP4で11.0\%とほぼ同水準であり、誤差の絶対的な大きさでは説明できないことが明らかになった。
+
+一方、FP4（E2M1形式、行ごとに最大値を6.0へ正規化）は表現可能な最小非零絶対値が1.0（スケール後）であり、この下限を下回る重みは全て一方的に切り上げられる。実測の結果、対象層の重みの約31\%がこの下限による系統的な切り上げの影響を受けていた。対照的に、INT4の丸め誤差は正負にほぼ均等に分布する（無偏）。Linear層の各出力は数十個の重みと入力の積和によって決定されるため、無偏な誤差は加算の過程で部分的に相殺される一方、一方向に偏った誤差は相殺されずに蓄積・増幅される。実際に、FP4適用後のMLP出力（エントロピーモデルのスケール予測）は、FP32と比較して分布の幅が約35〜40\%系統的に狭く（自信過剰に）シフトしていることを確認した。図\ref{fig:weight-hist}に、格子特徴予測MLP出力層の実際の重み分布と、INT4・FP4それぞれの表現可能な量子化レベルを重ねて示す——FP4の最小表現可能レベル（floor）を下回る重みの割合は32.0\%に達しており、これらは量子化時に一方的に切り上げられる。
+
+\Figure[t!](topskip=0pt,midskip=5pt,botskip=0pt)[width=\columnwidth]{figures/fig_weight_hist_fp4floor.pdf}{実際の重み分布とINT4・FP4の表現可能レベル（\texttt{mlp\_grid}出力層、行0）\label{fig:weight-hist}}
+
+\subsection{FP8とFP4の比較：ダイナミックレンジの不足}
+同じ浮動小数点形式でありながらFP8（$-14.35\%$）とFP4（$+161.04\%$）の間に生じた差についても、同様に実測によって要因を特定した。対象層の重みの絶対値分布を調べたところ、最大値と1パーセンタイル値の比（実効的なダイナミックレンジ）は158〜752倍に達していた。FP8（E4M3、スケーリングなし）が表現可能なダイナミックレンジは約30{,}720倍であり、この実際の分布に十分な余裕を持って対応できる。一方、FP4（E2M1、行スケーリング併用）が表現可能なダイナミックレンジはわずか6倍であり、実際の重み分布の広がりに遠く及ばない。指数部ビット数の違い（4bit対2bit）が、そのままカバー可能なダイナミックレンジの違いとなって現れ、これがFP4特有の系統的な丸め誤差を引き起こす直接の原因であることが明らかになった。図\ref{fig:dynamic-range}に、実際の重み分布のダイナミックレンジとFP8・FP4それぞれが表現可能なダイナミックレンジを対数スケールで比較する。
+
+\Figure[t!](topskip=0pt,midskip=5pt,botskip=0pt)[width=\columnwidth]{figures/fig_dynamic_range.pdf}{実際の重み分布とFP8・FP4の表現可能ダイナミックレンジの比較\label{fig:dynamic-range}}
+
+このFP4の劣化は偶発的な現象ではないことを確認するため、同一設定で独立に5回の再学習を行い、それぞれに対しFP32・FP4量子化を適用した。学習自体はGPU上のatomicAdd演算に起因して実行ごとに異なる重みに収束するが\footnote{\begin{CJK}{UTF8}{min}この非決定性の原因と対処については本研究の付録で別途議論する。\end{CJK}}、いずれの独立な学習結果に対しても、FP4適用後の総伝送サイズはFP32比で2.0〜2.9倍に一貫して悪化しており、特定の学習試行に固有の偶発的現象ではなく、構造的な性質であることを確認した。
+
+\subsection{INT8量子化の汎化性}
+\texttt{truck}で最良であったINT8量子化が他のシーンでも同様に有効であるかを検証するため、\texttt{train}・\texttt{drjohnson}・\texttt{playroom}の3シーンについても同一の評価を行った。表\ref{tab:generalization}に、FP32（無量子化、縮小アーキテクチャのみ）とINT8それぞれのBD-Rateを示す。
+
+\begin{table}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{INT8量子化の4シーンにおける汎化性（RENO有効）}
+\label{tab:generalization}
+\centering
+\begin{tabular}{lrr}
+\toprule
+シーン & FP32 (\%) & INT8 (\%) \\
+\midrule
+truck & $-2.23$ & $-17.34$ \\
+train & $-9.74$ & $-28.25$ \\
+drjohnson & $-3.88$ & $-28.09$ \\
+playroom & $+8.87$ & $-23.37$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+INT8量子化は4シーン全てにおいて$-17\%$から$-28\%$という一貫した改善を示した。特に\texttt{playroom}では、縮小アーキテクチャ単体（FP32）では基準手法より悪化していた（$+8.87\%$）にもかかわらず、INT8量子化を加えることで$-23.37\%$まで改善しており、INT8量子化の効果がアーキテクチャ単体の性能に依存せず頑健であることを示している。
+
+\subsection{RENOアブレーション}
+アンカー位置の圧縮を担う学習型コーデックRENOの寄与を分離するため、同一アーキテクチャ・同一学習設定のままRENOをG-PCCに置き換えた構成で、上記4シーンに加え合成データセットの\texttt{hotdog}についても評価を行った。表\ref{tab:reno-ablation}に結果を示す。
+
+\begin{table}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{RENOの有無によるBD-Rateの比較}
+\label{tab:reno-ablation}
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+ & \multicolumn{2}{c}{FP32 (\%)} & \multicolumn{2}{c}{INT8 (\%)} \\
+シーン & RENOあり & RENOなし & RENOあり & RENOなし \\
+\midrule
+truck & $-2.23$ & $+17.49$ & $-17.34$ & $+3.24$ \\
+train & $-9.74$ & $+28.24$ & $-28.25$ & $+8.25$ \\
+drjohnson & $-3.88$ & $+21.00$ & $-28.09$ & $-4.79$ \\
+playroom & $+8.87$ & $+64.48$ & $-23.37$ & $+24.29$ \\
+hotdog & --- & $+101.29$ & --- & $+10.73$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+RENOを無効化すると、全てのシーンでBD-Rateが17〜101ポイントという大幅な悪化を示した。特に合成データセットの\texttt{hotdog}では、RENO無効時のFP32構成でサイズがほぼ2倍（$+101.29\%$）にまで悪化しており、実写シーン（Tanks and Temples・Deep Blending）よりもさらに強くRENOの効果に依存していることが明らかになった。INT8量子化はRENO無効構成においても一貫してFP32単体より改善をもたらしたが（例えば\texttt{hotdog}では$+101.29\%$から$+10.73\%$へ改善）、唯一\texttt{drjohnson}を除き、量子化の効果だけではRENOを無効化したことによる損失を完全には相殺できなかった。
+
+これらの結果は、本研究で検討したMLP量子化幅という設計軸（最良でも数十ポイント規模の影響）よりも、アンカー位置の圧縮に学習型コーデックを採用するか否かという設計軸の方が、全体の圧縮性能に遥かに大きな影響を与えることを示している。
+
+\subsection{文献値との比較}
+最後に、本研究で最良の構成であったINT8量子化（RENO有効）が、既存の代表的な3DGS圧縮手法と比較してどの位置にあるかを確認する。表\ref{tab:literature-result}に、3DGS・Scaffold-GSに加え、HAC・HAC++自体を直接の基盤として拡張したHAC/HAC++直接派生系の手法（PCGS\cite{chen2025pcgs}・SymGS\cite{gupta2025symgs}）、HACと同様の設計思想（アンカー属性の確率分布予測・算術符号化）を独立に採用したエントロピー符号化系の手法（CompGS\cite{liu2024compgs}・ContextGS・ICLR~2025で発表されたCAT-3DGS\cite{zhan2025cat3dgs}、および2026年に発表された最新手法であるYuら\cite{yu2026practical}）、代表的なコードブック・ベクトル量子化系の手法（Compressed3D\cite{niedermayr2024compressed}）、さらに標準動画コーデック（HEVC）を利用するLeeら\cite{lee2025codecgs}の手法（CodecGS）の原論文報告値（表\ref{tab:literature}と同一、Tanks and Temples平均）を示し、本研究の提案構成（\texttt{truck}・\texttt{train}シーンの実測平均、高レート点$\lambda=0.001$・低レート点$\lambda=0.005$）と比較する。コードブック・ベクトル量子化系やプルーニング系のその他の手法（Lee ら・EAGLES・LightGaussian・SOG・Navaneetら・Reduced3DGS・RDOGaussian・MesonGS-FT）は表\ref{tab:literature}にまとめて示す。
+
+\begin{table*}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{既存手法との比較（Tanks and Temples平均）}
+\label{tab:literature-result}
+\centering
+\begin{tabular}{p{5.2cm}rrrrr}
+\toprule
+手法 & サイズ (MB) & PSNR & SSIM & LPIPS & FPS \\
+\midrule
+3DGS\cite{kerbl20233d}（原論文報告値） & 431.0 & 23.69 & 0.844 & 0.178 & -- \\
+Scaffold-GS\cite{lu2024scaffold}（原論文報告値） & 86.50 & 23.96 & 0.853 & 0.177 & -- \\
+Compressed3D\cite{niedermayr2024compressed}（原論文報告値） & 17.28 & 23.32 & 0.832 & 0.194 & -- \\
+HAC\cite{chen2024hac}（原論文報告値、lowrate） & 8.10 & 24.04 & 0.846 & 0.187 & -- \\
+HAC\cite{chen2024hac}（原論文報告値、highrate） & 11.24 & 24.40 & 0.853 & 0.177 & -- \\
+CompGS\cite{liu2024compgs}（原論文報告値、lowrate） & 5.89 & 23.11 & 0.815 & 0.236 & -- \\
+CompGS\cite{liu2024compgs}（原論文報告値、highrate） & 9.60 & 23.70 & 0.837 & 0.208 & -- \\
+ContextGS\cite{wang2024contextgs}（原論文報告値、lowrate） & 7.05 & 24.20 & 0.852 & 0.184 & -- \\
+ContextGS\cite{wang2024contextgs}（原論文報告値、highrate） & 11.80 & 24.29 & 0.855 & 0.176 & -- \\
+HAC++\cite{chen2025hacpp}（原論文報告値、lowrate） & 5.18 & 24.22 & 0.849 & 0.190 & -- \\
+HAC++\cite{chen2025hacpp}（原論文報告値、highrate） & 8.63 & 24.32 & 0.854 & 0.178 & -- \\
+PCGS\cite{chen2025pcgs}（原論文報告値、lowrate） & 5.67 & 24.50 & 0.852 & 0.186 & -- \\
+PCGS\cite{chen2025pcgs}（原論文報告値、highrate） & 9.87 & 24.59 & 0.856 & 0.181 & -- \\
+SymGS\cite{gupta2025symgs}（原論文報告値、T\&T 2シーン平均） & 7.14 & 24.02 & -- & -- & -- \\
+CAT-3DGS\cite{zhan2025cat3dgs}（原論文報告値、lowrate） & 1.42 & 22.97 & 0.786 & 0.293 & -- \\
+CAT-3DGS\cite{zhan2025cat3dgs}（原論文報告値、highrate） & 6.93 & 24.41 & 0.853 & 0.189 & -- \\
+Yuら\cite{yu2026practical}（原論文報告値、2026、lowrate） & 1.64 & 23.86 & 0.830 & 0.229 & -- \\
+Yuら\cite{yu2026practical}（原論文報告値、2026、highrate） & 5.01 & 24.50 & 0.857 & 0.177 & -- \\
+Leeら\cite{lee2025codecgs}（CodecGS、原論文報告値、HEVC使用） & 7.46 & 23.63 & 0.842 & 0.192 & -- \\
+\midrule
+HAC-plus（本研究、実測、lowrate） & 4.22 & 24.13 & -- & -- & -- \\
+HAC-plus（本研究、実測、highrate） & 8.49 & 24.32 & -- & -- & -- \\
+\textbf{提案（本研究、実測、lowrate）} & $\mathbf{4.13}$ & $\mathbf{24.11}$ & $\mathbf{0.844}$ & $\mathbf{0.204}$ & $\mathbf{193.0}$ \\
+\textbf{提案（本研究、実測、highrate）} & $\mathbf{8.61}$ & $\mathbf{24.37}$ & $\mathbf{0.856}$ & $\mathbf{0.178}$ & $\mathbf{152.6}$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+提案構成（INT8量子化・RENO有効）は、高レート点でHAC++とほぼ同一の伝送サイズ（$8.61$MB対$8.63$MB）でありながら、PSNRでわずかに上回った（$24.37$対$24.32$）。低レート点では、HAC++の$5.18$MBに対し提案構成は$4.13$MBと約20\%小さいサイズを達成しており、PSNRの低下（$24.22$対$24.11$）はわずかである。HAC++自体を直接拡張したPCGSは、高レート点で$9.87$MB・PSNR$24.59$、低レート点でも$5.67$MB・PSNR$24.50$と、提案構成よりも高いPSNRを報告しているが、これは本研究が主眼とするエントロピー側情報ネットワークの量子化ではなく、段階的符号化という別軸の改良によるものであり、両者は排他的ではなく併用可能な設計軸であると考えられる。同じくHACを直接拡張したSymGS（対称性検出、$7.14$MB・PSNR$24.02$、ただしT\&T全体ではなく2シーン平均）は、提案構成の低レート点と近いサイズでPSNRがやや下回る。ContextGSの低レート点（$7.05$MB、PSNR$24.20$）と比較すると、提案構成は約40\%小さいサイズで同程度のPSNRを達成している。2025年にICLRで発表された最新手法CAT-3DGSは、高レート点（$6.93$MB、PSNR$24.41$）において提案構成よりもさらに小さいサイズで高いPSNRを達成しており、トライプレーン上での空間的・チャネル方向の自己回帰的文脈符号化が、本研究の対象であるハッシュグリッド＋causal KNN文脈集約よりも効率的な文脈表現である可能性を示唆している。一方、CAT-3DGSの低レート点（$1.42$MB、PSNR$22.97$）は他手法と比べて著しく低いPSNRであり、操作点の範囲が本研究や他手法と大きく異なる点には注意が必要である。2026年に発表されたYuらの手法は、高レート点で$5.01$MB・PSNR$24.50$を報告しており、本研究の提案構成（$8.61$MB・PSNR$24.37$）と比較してサイズ・PSNRの両方で上回っている。空間集約を介さずアンカー座標由来の幾何文脈のみで文脈モデルを構成するという、本研究のcausal KNNによる近傍集約（Section~\ref{sec:causal-knn}）とは異なる設計方針が、2026年時点でさらに優れたレート歪み性能を達成していることを示しており、今後の課題として触れる軽量な文脈モデル設計の検討材料となる。
+
+標準動画コーデック（HEVC）を利用するLeeらの手法（CodecGS、$7.46$MB、PSNR$23.63$）は、本研究の提案構成よりもサイズは小さいもののPSNRで劣っており、学習可能な確率分布予測モデルを用いるHACの系譜の手法（本研究の提案構成を含む）の方が、同程度またはそれ以上に小さいサイズでより高いPSNRを達成していることが分かる。これは、汎用の動画コーデックが持つ固定的なエントロピー符号化器よりも、GS属性の統計的性質に特化して学習された確率分布予測器の方が、少なくとも現時点ではレート歪み性能において優位にあることを示唆している。コードブック・ベクトル量子化系のCompressed3D（$17.28$MB、PSNR$23.32$）は、HACの系譜とは異なる量子化・符号化戦略（センシティビティを考慮したベクトル量子化＋エントロピー・ランレングス符号化）を採用しており、サイズ・PSNRの両面で本研究の提案構成を下回る。ただし、これらの数値はSSIM・LPIPSを含む完全な評価プロトコルの一致を保証するものではなく（表\ref{tab:literature}参照）、あくまで参考比較として提示する。なお、レンダリングFPS（テストビューでの実測値）は、高レート点（$\lambda=0.001$）で$152.6$、低レート点（$\lambda=0.005$）で$193.0$であった——量子化対象のMLPがレンダリング経路に関与しないため、この値はFP32・INT8いずれの構成でも同一である。既存手法の多くはTanks and Temples・Deep Blendingに対するFPSを報告していないため（Mip-NeRF360に対してのみFPSを報告する文献が多い）、表\ref{tab:literature-result}の既存手法欄は“--”としている。
+
+\subsection{Deep Blendingデータセットにおける文献値との比較}
+本研究は\texttt{truck}・\texttt{train}（Tanks and Temples）だけでなく、\texttt{drjohnson}・\texttt{playroom}（Deep Blending）でも同一の評価を行っている（表\ref{tab:generalization}--\ref{tab:reno-ablation}参照）。そこで、Deep Blendingデータセットについても同様の文献値比較を行う。表\ref{tab:literature-db}に、\cite{chen2025hacpp}のTable~IIより引用した既存手法の原論文報告値、\cite{wang2024contextgs}のTable~1より引用したContextGS、\cite{zhan2025cat3dgs}のTable~10より引用したCAT-3DGS、\cite{yu2026practical}のTable~12より引用したYuらの手法、および本研究の実測値（\texttt{drjohnson}・\texttt{playroom}平均、高レート点$\lambda=0.001$・低レート点$\lambda=0.005$、無修正HAC-plusと提案構成の双方）を示す。
+
+\begin{table*}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{既存手法との比較（Deep Blending平均）}
+\label{tab:literature-db}
+\centering
+\begin{tabular}{p{5.2cm}rrrrr}
+\toprule
+手法 & サイズ (MB) & PSNR & SSIM & LPIPS & FPS \\
+\midrule
+3DGS\cite{kerbl20233d}（原論文報告値） & 663.9 & 29.42 & 0.899 & 0.247 & -- \\
+Scaffold-GS\cite{lu2024scaffold}（原論文報告値） & 66.00 & 30.21 & 0.906 & 0.254 & -- \\
+Compressed3D\cite{niedermayr2024compressed}（原論文報告値） & 25.30 & 29.38 & 0.898 & 0.253 & -- \\
+HAC\cite{chen2024hac}（原論文報告値、lowrate） & 4.35 & 29.98 & 0.902 & 0.269 & -- \\
+HAC\cite{chen2024hac}（原論文報告値、highrate） & 6.35 & 30.34 & 0.906 & 0.258 & -- \\
+CompGS\cite{liu2024compgs}（原論文報告値、lowrate） & 6.03 & 29.30 & 0.895 & 0.293 & -- \\
+CompGS\cite{liu2024compgs}（原論文報告値、highrate） & 8.77 & 29.69 & 0.901 & 0.279 & -- \\
+ContextGS\cite{wang2024contextgs}（原論文報告値、lowrate） & 3.45 & 30.11 & 0.907 & 0.265 & -- \\
+ContextGS\cite{wang2024contextgs}（原論文報告値、highrate） & 6.60 & 30.39 & 0.909 & 0.258 & -- \\
+HAC++\cite{chen2025hacpp}（原論文報告値、lowrate） & 2.91 & 30.16 & 0.907 & 0.266 & -- \\
+HAC++\cite{chen2025hacpp}（原論文報告値、highrate） & 5.28 & 30.34 & 0.911 & 0.254 & -- \\
+CAT-3DGS\cite{zhan2025cat3dgs}（原論文報告値、lowrate） & 0.93 & 28.53 & 0.878 & 0.336 & -- \\
+CAT-3DGS\cite{zhan2025cat3dgs}（原論文報告値、highrate） & 3.56 & 30.29 & 0.909 & 0.269 & -- \\
+Yuら\cite{yu2026practical}（原論文報告値、2026、lowrate） & 1.01 & 30.07 & 0.901 & 0.284 & -- \\
+Yuら\cite{yu2026practical}（原論文報告値、2026、highrate） & 3.35 & 30.58 & 0.912 & 0.253 & -- \\
+\midrule
+HAC-plus（本研究、実測、lowrate） & 2.21 & 29.96 & -- & -- & -- \\
+HAC-plus（本研究、実測、highrate） & 5.17 & 30.21 & -- & -- & -- \\
+\textbf{提案（本研究、実測、lowrate）} & $\mathbf{2.25}$ & $\mathbf{30.21}$ & $\mathbf{0.904}$ & $\mathbf{0.282}$ & $\mathbf{266.2}$ \\
+\textbf{提案（本研究、実測、highrate）} & $\mathbf{4.98}$ & $\mathbf{30.37}$ & $\mathbf{0.910}$ & $\mathbf{0.263}$ & $\mathbf{231.5}$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Tanks and Templesと同様の傾向が確認できる。提案構成は高レート点でHAC++（$5.28$MB、PSNR$30.34$）よりも小さいサイズ（$4.98$MB）で同程度のPSNR（$30.37$）を達成し、低レート点ではContextGSの低レート点（$3.45$MB、PSNR$30.11$）より約35\%小さいサイズ（$2.25$MB）でわずかに高いPSNR（$30.21$）を達成している。一方、2026年のYuらの手法は高レート点で$3.35$MB・PSNR$30.58$と、Tanks and Templesの場合と同様にサイズ・PSNRの両方で提案構成を上回っており、Deep Blendingにおいても同様の傾向が再現されている。レンダリングFPSは高レート点で$231.5$、低レート点で$266.2$であり、Tanks and Temples（表\ref{tab:literature-result}）よりも高い値を示した——これはDeep Blendingの2シーンがTanks and Templesよりも少ないガウシアン数で構成される傾向にあるためである。
+
+\subsection{NeRF Syntheticデータセットにおける位置づけ}
+Tanks and Temples・Deep Blendingに加え、合成データセットNeRF Synthetic（Blenderデータセット）の全8シーン（\texttt{chair}・\texttt{drums}・\texttt{ficus}・\texttt{hotdog}・\texttt{lego}・\texttt{materials}・\texttt{mic}・\texttt{ship}）についても、RENO有効・本研究と同一の縮小アーキテクチャで学習済みの構成が利用可能であったため、同様の比較を行う。ただし、この8シーンの学習は、本研究の主たる評価軸であるポストトレーニング量子化（学習後に任意の量子化幅を一括適用する方式）ではなく、\textbf{FP8量子化を学習時に組み込んだ構成}（表\ref{tab:quant-sweep}のFP8相当、BD-Rate$-14.35\%$で全8構成中2位）で学習されたものである。したがって本節の数値は「提案（INT8・ポストトレーニング量子化）」ではなく「FP8＋RENO」として、既存手法と並べて提示する。
+
+表\ref{tab:literature-synth}に、\cite{chen2025hacpp}のTable~IIより引用した3DGS・Scaffold-GS・HAC・HAC++のSynthetic-NeRF平均値と、本研究の8シーン実測平均（高レート点$\lambda=0.001$・低レート点$\lambda=0.005$）を示す。
+
+\begin{table*}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{既存手法との比較（NeRF Synthetic、8シーン平均）}
+\label{tab:literature-synth}
+\centering
+\begin{tabular}{p{5.2cm}rrrrr}
+\toprule
+手法 & サイズ (MB) & PSNR & SSIM & LPIPS & FPS \\
+\midrule
+3DGS\cite{kerbl20233d}（原論文報告値） & 68.46 & 33.80 & 0.970 & 0.031 & -- \\
+Scaffold-GS\cite{lu2024scaffold}（原論文報告値） & 19.36 & 33.41 & 0.966 & 0.035 & -- \\
+HAC\cite{chen2024hac}（原論文報告値、lowrate） & 1.18 & 33.24 & 0.967 & 0.037 & -- \\
+HAC\cite{chen2024hac}（原論文報告値、highrate） & 1.86 & 33.71 & 0.968 & 0.034 & -- \\
+HAC++\cite{chen2025hacpp}（原論文報告値、lowrate） & 0.88 & 33.03 & 0.966 & 0.039 & -- \\
+HAC++\cite{chen2025hacpp}（原論文報告値、highrate） & 1.84 & 33.76 & 0.969 & 0.033 & -- \\
+\midrule
+\textbf{FP8+RENO（本研究、実測、lowrate）} & $\mathbf{1.00}$ & $\mathbf{31.51}$ & $\mathbf{0.955}$ & $\mathbf{0.056}$ & $\mathbf{418.7}$ \\
+\textbf{FP8+RENO（本研究、実測、highrate）} & $\mathbf{1.70}$ & $\mathbf{33.44}$ & $\mathbf{0.965}$ & $\mathbf{0.040}$ & $\mathbf{345.1}$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+高レート点では、本研究のFP8+RENO構成（$1.70$MB、PSNR$33.44$）は、HAC++（$1.84$MB、PSNR$33.76$）よりもわずかに小さいサイズを達成しているが、PSNR・SSIM・LPIPSのいずれでもHAC++をわずかに下回る。これは、本節の構成がINT8ではなくFP8（表\ref{tab:quant-sweep}でINT8に次ぐ2位の構成）を用いていることと整合的である。一方、低レート点では、本研究の構成（$1.00$MB、PSNR$31.51$）はHAC++の低レート点（$0.88$MB、PSNR$33.03$）よりもサイズが大きいにもかかわらずPSNRが約1.5dB低く、8シーン中で明確に劣った結果となった。内訳を確認すると、この低下は主に\texttt{ship}シーン（PSNR$29.31$、SSIM$0.872$、LPIPS$0.178$——8シーン中最も再構成が困難なシーン）に牽引されており、他の7シーンはおおむね30dB台後半から36dB台のPSNRを示している。この結果は、本研究の主要な知見（8bit前後の量子化はレンダリング画質に影響しない）がNeRF Syntheticデータセットでも成り立つことを確認する一方で、FP8という量子化幅の選択自体が、特に低レート（高圧縮率）側で、より頑健なINT8と比較して性能差を生みうることを示唆している。レンダリングFPSは高レート点で$345.1$、低レート点で$418.7$であり、合成データセットのシンプルな形状を反映してTanks and Temples・Deep Blendingよりも高い値を示した。
+
+\subsection{結論と今後の課題}
+本研究では、HAC-plusのエントロピー予測ネットワークに特化した量子化幅のアブレーション研究を行い、以下の知見を得た。第一に、8bit前後の量子化（INT8・INT6・FP8・FP16）はレンダリング画質に影響を与えることなく、追加コストなしに圧縮率を6〜19\%改善できる。第二に、4bit以下への量子化は、エントロピー予測精度の劣化に起因する符号化コストの爆発的増大により、総伝送サイズをむしろ悪化させる。第三に、この崩壊は量子化誤差の大きさではなく、系統的な丸めの偏り——特にfloat形式における指数部ビット不足によるダイナミックレンジの不足——に起因することを、実測によって定量的に明らかにした。第四に、整数量子化（特にINT8）は同一ビット幅の浮動小数点量子化より一貫して優れており、これは整数量子化の丸め誤差が無偏である一方、低ビット幅のminifloat形式は構造的に偏った誤差を生じやすいという性質の違いに起因する。第五に、アンカー位置圧縮における学習型コーデックRENOの採用は、MLP量子化幅の選択よりも遥かに大きく全体の圧縮性能を左右する。
+
+今後の課題としては、本研究で観測した非単調な関係を踏まえた適応的・レイヤーごとの混合精度量子化の検討、より広範なシーン・データセットでの検証、および量子化を考慮した学習（quantization-aware training）による低ビット幅領域での性能改善の可能性が挙げられる。
+\end{CJK}
+
+% \section*{Acknowledgment}
+% \begin{CJK}{UTF8}{min}
+% （必要に応じて謝辞を記載）
+% \end{CJK}
+
+\begin{thebibliography}{00}
+\bibitem{kerbl20233d} B.~Kerbl, G.~Kopanas, T.~Leimk\"uhler, and G.~Drettakis, ``3D Gaussian Splatting for Real-Time Radiance Field Rendering,'' \emph{ACM Trans. Graph.}, vol.~42, no.~4, 2023.
+\bibitem{lu2024scaffold} T.~Lu \emph{et al.}, ``Scaffold-GS: Structured 3D Gaussians for View-Adaptive Rendering,'' in \emph{Proc. CVPR}, 2024.
+\bibitem{chen2024hac} Y.~Chen \emph{et al.}, ``HAC: Hash-grid Assisted Context for 3D Gaussian Splatting Compression,'' in \emph{Proc. ECCV}, 2024.
+\bibitem{chen2025hacpp} Y.~Chen \emph{et al.}, ``HAC++: Towards 100X Compression of 3D Gaussian Splatting,'' arXiv:2501.12255, 2025.
+\bibitem{wang2024contextgs} Y.~Wang \emph{et al.}, ``ContextGS: Compact 3D Gaussian Splatting with Anchor Level Context Model,'' in \emph{Proc. NeurIPS}, 2024.
+\bibitem{niedermayr2024compressed} S.~Niedermayr, J.~Stumpfegger, and R.~Westermann, ``Compressed 3D Gaussian Splatting for Accelerated Novel View Synthesis,'' in \emph{Proc. CVPR}, 2024.
+\bibitem{lee2024compact} J.~C.~Lee, D.~Rho, X.~Sun, J.~H.~Ko, and E.~Park, ``Compact 3D Gaussian Representation for Radiance Field,'' in \emph{Proc. CVPR}, 2024.
+\bibitem{girish2024eagles} S.~Girish, K.~Gupta, and A.~Shrivastava, ``EAGLES: Efficient Accelerated 3D Gaussians with Lightweight EncodingS,'' in \emph{Proc. ECCV}, 2024.
+\bibitem{fan2024lightgaussian} Z.~Fan, K.~Wang, K.~Wen, Z.~Zhu, D.~Xu, and Z.~Wang, ``LightGaussian: Unbounded 3D Gaussian Compression with 15x Reduction and 200+ FPS,'' in \emph{Proc. NeurIPS}, 2024.
+\bibitem{morgenstern2024sog} W.~Morgenstern, F.~Barthel, A.~Hilsmann, and P.~Eisert, ``Compact 3D Scene Representation via Self-Organizing Gaussian Grids,'' in \emph{Proc. ECCV}, 2024.
+\bibitem{navaneet2024compact3d} K.~L.~Navaneet, K.~P.~Meibodi, S.~A.~Koohpayegani, and H.~Pirsiavash, ``Compact3D: Compressing Gaussian Splat Radiance Field Models with Vector Quantization,'' arXiv:2311.18159, 2023.
+\bibitem{papantonakis2024reduced3dgs} P.~Papantonakis, G.~Kopanas, B.~Kerbl, A.~Lanvin, and G.~Drettakis, ``Reducing the Memory Footprint of 3D Gaussian Splatting,'' \emph{Proc. ACM Comput. Graph. Interact. Tech.}, vol.~7, no.~1, 2024.
+\bibitem{wang2024rdogaussian} H.~Wang, H.~Zhu, T.~He, R.~Feng, J.~Deng, J.~Bian, and Z.~Chen, ``End-to-End Rate-Distortion Optimized 3D Gaussian Representation,'' in \emph{Proc. ECCV}, 2024.
+\bibitem{xie2024mesongs} S.~Xie, W.~Zhang, C.~Tang, Y.~Bai, R.~Lu, S.~Ge, and Z.~Wang, ``MesonGS: Post-training Compression of 3D Gaussians via Efficient Attribute Transformation,'' in \emph{Proc. ECCV}, 2024.
+\bibitem{liu2024compgs} X.~Liu, X.~Wu, P.~Zhang, S.~Wang, Z.~Li, and S.~Kwong, ``CompGS: Efficient 3D Scene Representation via Compressed Gaussian Splatting,'' in \emph{Proc. ACM Int. Conf. Multimedia}, 2024.
+\bibitem{zhan2025cat3dgs} Y.-T.~Zhan, C.-Y.~Ho, H.~Yang \emph{et al.}, ``CAT-3DGS: A Context-Adaptive Triplane Approach to Rate-Distortion-Optimized 3DGS Compression,'' in \emph{Proc. ICLR}, 2025.
+\bibitem{lee2025codecgs} S.~Lee, F.~Shu, Y.~Sanchez, T.~Schierl, and C.~Hellge, ``Compression of 3D Gaussian Splatting with Optimized Feature Planes and Standard Video Codecs,'' in \emph{Proc. ICCV}, 2025.
+\bibitem{yu2026practical} P.~Yu, Y.~Chen, F.~Song, T.~Qin, Q.~Zhang, J.~Wang, and Y.~Guo, ``Towards Practical Compression of 3D Gaussian Splatting,'' arXiv:2609.30245, 2026.
+\bibitem{martin2026structured} P.~Martin, A.~Rodrigues, J.~Ascenso, and M.~P.~Queluz, ``Structured Image-based Coding for Efficient Gaussian Splatting Compression,'' arXiv:2601.14510, 2026.
+\bibitem{chen2025pcgs} Y.~Chen, M.~Li, Q.~Wu, W.~Lin, M.~Harandi, and J.~Cai, ``PCGS: Progressive Compression of 3D Gaussian Splatting,'' arXiv:2503.08511, 2025.
+\bibitem{gupta2025symgs} K.~Gupta, A.~Sanghvi, S.~R.~Palley, A.~Srivastava, C.~Sharma, and A.~Sharma, ``SymGS: Leveraging Local Symmetries for 3D Gaussian Splatting Compression,'' arXiv:2511.13264, 2025.
+\bibitem{reno} (Replace with RENO's actual publication details before submission)
+\bibitem{gpcc} ``G-PCC Test Model (TMC13),'' ISO/IEC JTC1/SC29/WG7, MPEG 3D Graphics Coding.
+\bibitem{muller2022instant} T.~M\"uller, A.~Evans, C.~Schied, and A.~Keller, ``Instant Neural Graphics Primitives with a Multiresolution Hash Encoding,'' \emph{ACM Trans. Graph.}, vol.~41, no.~4, 2022.
+\bibitem{ocp_mx} Open Compute Project, ``OCP Microscaling Formats (MX) Specification,'' 2023.
+\bibitem{bjontegaard2001} G.~Bj{\o}ntegaard, ``Calculation of Average PSNR Differences between RD-Curves,'' ITU-T SG16 Doc. VCEG-M33, 2001.
+\bibitem{knapitsch2017tanks} A.~Knapitsch, J.~Park, Q.-Y.~Zhou, and V.~Koltun, ``Tanks and Temples: Benchmarking Large-Scale Scene Reconstruction,'' \emph{ACM Trans. Graph.}, vol.~36, no.~4, 2017.
+\bibitem{hedman2018deep} P.~Hedman \emph{et al.}, ``Deep Blending for Free-Viewpoint Image-Based Rendering,'' \emph{ACM Trans. Graph.}, vol.~37, no.~6, 2018.
+\bibitem{mildenhall2020nerf} B.~Mildenhall \emph{et al.}, ``NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis,'' in \emph{Proc. ECCV}, 2020.
+\end{thebibliography}
+
+\EOD
+
+\end{document}

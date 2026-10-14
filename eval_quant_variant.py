@@ -54,7 +54,15 @@ def main():
     parser.add_argument("--variant", type=str, required=True,
                          choices=['fp32', 'fp16', 'fp8', 'fp4', 'int8', 'int6', 'int4', 'int2'])
     parser.add_argument("--fp8_variant", type=str, default='e4m3', choices=['e4m3', 'e5m2'])
+    parser.add_argument("--quantize_anchor_cond_norm", action='store_true', default=False,
+                         help="Also fold anchor_cond_norm (~367K params) into the quantization "
+                              "target set for this variant, instead of leaving it at fp32.")
     parser.add_argument("--out_json", type=str, required=True)
+    parser.add_argument("--save_image_idx", type=int, default=-1,
+                         help="If >=0, save the rendered test-camera image at this index (plus "
+                              "ground truth, on the first call site that needs it) alongside "
+                              "--out_json, for qualitative before/after comparison figures.")
+    parser.add_argument("--save_image_dir", type=str, default=None)
     args = parser.parse_args()
 
     dataset = lp.extract(args)
@@ -119,6 +127,7 @@ def main():
             f"hash-grid coordinate normalization can't match what the model was trained with.")
 
     with torch.no_grad():
+        gaussians._quantize_anchor_cond_norm_too = args.quantize_anchor_cond_norm
         if args.variant == 'fp8':
             gaussians.quantize_mlps_fp8_(fp8_variant=args.fp8_variant)
         elif args.variant == 'fp4':
@@ -143,7 +152,7 @@ def main():
         lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
         cameras = scene.getTestCameras()
         l1_sum = psnr_sum = ssim_sum = lpips_sum = 0.0
-        for viewpoint in cameras:
+        for idx, viewpoint in enumerate(cameras):
             voxel_visible_mask = prefilter_voxel(viewpoint, gaussians, pipe, background)
             render_output = render(viewpoint, gaussians, pipe, background, visible_mask=voxel_visible_mask)
             image = torch.clamp(render_output["render"], 0.0, 1.0)
@@ -152,6 +161,13 @@ def main():
             psnr_sum += psnr(image, gt_image).mean().item()
             ssim_sum += ssim(image, gt_image).mean().item()
             lpips_sum += lpips_fn(image, gt_image, normalize=False).detach().mean().item()
+            if idx == args.save_image_idx:
+                import torchvision
+                out_dir = args.save_image_dir or os.path.dirname(args.out_json)
+                os.makedirs(out_dir, exist_ok=True)
+                torchvision.utils.save_image(image, os.path.join(out_dir, f"render_{args.variant}_cam{idx}.png"))
+                if not os.path.exists(os.path.join(out_dir, f"render_gt_cam{idx}.png")):
+                    torchvision.utils.save_image(gt_image, os.path.join(out_dir, f"render_gt_cam{idx}.png"))
         n = max(1, len(cameras))
 
         result = {

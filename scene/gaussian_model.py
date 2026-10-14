@@ -840,6 +840,10 @@ class GaussianModel(nn.Module):
             # 'mlp' so it was previously skipped by this loop entirely -- silently free in every
             # size report). Count it alongside mlp_grid/mlp_deform as an entropy-side-info module.
             is_causal_knn = n.startswith('causal_knn.')
+            # NOTE: anchor_cond_norm (~367K params) is deliberately NOT counted here, by request --
+            # keeping get_mlp_size()'s target set at mlp_grid/mlp_deform/causal_knn only, matching
+            # every number already reported in the paper draft. (It was briefly added and then
+            # reverted; see git history/conversation log if this needs revisiting.)
             if not ('mlp' in n or is_causal_knn):
                 continue
             # Only mlp_grid/mlp_deform/causal_knn (the entropy-prediction side info) are ever
@@ -1145,10 +1149,22 @@ class GaussianModel(nn.Module):
         submodule names don't contain 'mlp'), so its weights were silently free in every size
         report; they're included here and in get_mlp_size()'s name matching so the reported Total
         actually reflects what a real decoder would need to receive.
+
+        anchor_cond_norm is NOT included by default: its FiLM projections feed the hash-grid
+        feature mlp_grid conditions its entropy predictions on, so it is genuine side info too,
+        but it was historically left out of quantize_mlps_*_'s target set (unlike the
+        get_mlp_size() counting gap this fixes elsewhere, this one is a deliberate default, not a
+        bug) and changing that default would silently alter every existing quantize_mlps_*_ call
+        site's behavior. Set self._quantize_anchor_cond_norm_too = True before calling any
+        quantize_mlps_*_ method to additionally fold it into the quantization target set for that
+        call -- used to ablate whether anchor_cond_norm (at ~367K params, comparable in size to
+        mlp_grid) is worth quantizing too.
         """
         mods = [self.mlp_grid, self.mlp_deform]
         if getattr(self, 'use_causal_knn', False) and hasattr(self, 'causal_knn'):
             mods.append(self.causal_knn)
+        if getattr(self, '_quantize_anchor_cond_norm_too', False) and getattr(self, 'use_anchor_cond_norm', False):
+            mods.append(self.anchor_cond_norm)
         return mods
 
     def quantize_mlps_fp16_(self):
