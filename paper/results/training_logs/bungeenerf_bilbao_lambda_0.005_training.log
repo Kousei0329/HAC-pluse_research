@@ -1,0 +1,943 @@
+/root/HAC-pluse_research/utils/encodings.py:205: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, inputs, embeddings, offsets_list, resolutions_list, calc_grad_inputs=False, min_level_id=None, n_levels_calc=1, binary_vxl=None, PV=0):
+/root/HAC-pluse_research/utils/encodings.py:283: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad):
+/opt/conda/envs/HAC_env_pytorch2/lib/python3.10/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/opt/conda/envs/HAC_env_pytorch2/lib/python3.10/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=VGG16_Weights.IMAGENET1K_V1`. You can also use `weights=VGG16_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+2026-10-15 13:29:45,283 - INFO: args: Namespace(sh_degree=3, feat_dim=50, n_offsets=10, voxel_size=0.0, update_depth=3, update_init_factor=128, update_hierachy_factor=4, use_feat_bank=False, use_hierarchical=False, level1_voxel_scale=4.0, level2_per_level1=64, intra_anchor_type='mlp', mamba_hidden_dim=256, mamba_d_state=16, mamba_d_conv=4, mamba_n_layers=2, source_path='data/bungeenerf/bilbao', model_path='outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/bungeenerf/bilbao/lambda_0.005', images='images', resolution=-1, white_background=False, data_device='cuda', eval=True, lod=30, iterations=30000, position_lr_init=0.0, position_lr_final=0.0, position_lr_delay_mult=0.01, position_lr_max_steps=30000, offset_lr_init=0.01, offset_lr_final=0.0001, offset_lr_delay_mult=0.01, offset_lr_max_steps=30000, mask_lr_init=0.01, mask_lr_final=0.0005000000000000001, mask_lr_delay_mult=0.01, mask_lr_max_steps=30000, freeze_mask=False, feature_lr=0.0075, opacity_lr=0.02, scaling_lr=0.007, rotation_lr=0.002, mlp_opacity_lr_init=0.002, mlp_opacity_lr_final=2e-05, mlp_opacity_lr_delay_mult=0.01, mlp_opacity_lr_max_steps=30000, mlp_cov_lr_init=0.004, mlp_cov_lr_final=0.004, mlp_cov_lr_delay_mult=0.01, mlp_cov_lr_max_steps=30000, mlp_color_lr_init=0.008, mlp_color_lr_final=5e-05, mlp_color_lr_delay_mult=0.01, mlp_color_lr_max_steps=30000, mlp_featurebank_lr_init=0.01, mlp_featurebank_lr_final=1e-05, mlp_featurebank_lr_delay_mult=0.01, mlp_featurebank_lr_max_steps=30000, encoding_xyz_lr_init=0.005, encoding_xyz_lr_final=1e-05, encoding_xyz_lr_delay_mult=0.33, encoding_xyz_lr_max_steps=30000, mlp_grid_lr_init=0.005, mlp_grid_lr_final=1e-05, mlp_grid_lr_delay_mult=0.01, mlp_grid_lr_max_steps=30000, mlp_deform_lr_init=0.005, mlp_deform_lr_final=0.0005, mlp_deform_lr_delay_mult=0.01, mlp_deform_lr_max_steps=30000, causal_knn_lr_init=0.005, causal_knn_lr_final=1e-05, causal_knn_lr_delay_mult=0.01, causal_knn_lr_max_steps=30000, mlp_hyp_lr_init=0.005, mlp_hyp_lr_final=0.0005, mlp_hyp_lr_delay_mult=0.01, mlp_hyp_lr_max_steps=30000, percent_dense=0.01, lambda_dssim=0.2, start_stat=500, update_from=1500, update_interval=100, update_until=15000, min_opacity=0.005, success_threshold=0.8, densify_grad_threshold=0.0002, convert_SHs_python=False, compute_cov3D_python=False, debug=False, ip='127.0.0.1', port=6009, debug_from=-1, detect_anomaly=False, warmup=False, use_wandb=False, test_iterations=[30000], save_iterations=[30000, 30000], quiet=False, checkpoint_iterations=[], start_checkpoint=None, gpu='-1', log2=13, log2_2D=15, n_features=4, lmbda=0.005, plane_fusion='concat', use_level_gate=True, use_gated_mlp=False, use_spatial_context=False, use_joint_context=False, use_anchor_cond_norm=True, use_causal_knn=True, causal_knn_K=8, causal_knn_hidden_mult=2, mlp_grid_hidden_mult=4, use_3gmm=False, quantize_mlp_bits=0, quantize_mlp_fp16=False, quantize_mlp_fp8=False, quantize_mlp_fp4=False, fp8_variant='e4m3', prune_mlp_ratio=0.0, prune_finetune_iters=300, prune_finetune_lr=0.0001, prune_finetune_lambda_q=1000.0, seed=42, use_reno=True, reno_ckpt_path='/root/HAC-pluse_research/submodules/reno/model/Ford/ckpt.pt', train_reno=True, reno_train_interval=20, reno_lr=0.0001)
+2026-10-15 13:29:45,283 - INFO: Optimizing outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/bungeenerf/bilbao/lambda_0.005
+Warning: mamba-ssm not installed. Install with: pip install mamba-ssm
+Setting up [LPIPS] perceptual loss: trunk [vgg], v[0.1], spatial [off]
+Loading model from: /opt/conda/envs/HAC_env_pytorch2/lib/python3.10/site-packages/lpips/weights/v0.1/vgg.pth
+not found tf board
+Random seed set to: 42 [15/10 13:29:45]
+Output folder: outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/bungeenerf/bilbao/lambda_0.005 [15/10 13:29:45]
+Tensorboard not available: not logging progress [15/10 13:29:45]
+hash_params: True 4 13 (18, 24, 33, 44, 59, 80, 108, 148, 201, 275, 376, 514) 15 (130, 258, 514, 1026) True False False plane_fusion= concat use_level_gate= True [15/10 13:29:45]
+encoding_param_num=1766674, size=0.21060395240783691MB. [15/10 13:29:45]
+Reading camera 1/129Reading camera 2/129Reading camera 3/129Reading camera 4/129Reading camera 5/129Reading camera 6/129Reading camera 7/129Reading camera 8/129Reading camera 9/129Reading camera 10/129Reading camera 11/129Reading camera 12/129Reading camera 13/129Reading camera 14/129Reading camera 15/129Reading camera 16/129Reading camera 17/129Reading camera 18/129Reading camera 19/129Reading camera 20/129Reading camera 21/129Reading camera 22/129Reading camera 23/129Reading camera 24/129Reading camera 25/129Reading camera 26/129Reading camera 27/129Reading camera 28/129Reading camera 29/129Reading camera 30/129Reading camera 31/129Reading camera 32/129Reading camera 33/129Reading camera 34/129Reading camera 35/129Reading camera 36/129Reading camera 37/129Reading camera 38/129Reading camera 39/129Reading camera 40/129Reading camera 41/129Reading camera 42/129Reading camera 43/129Reading camera 44/129Reading camera 45/129Reading camera 46/129Reading camera 47/129Reading camera 48/129Reading camera 49/129Reading camera 50/129Reading camera 51/129Reading camera 52/129Reading camera 53/129Reading camera 54/129Reading camera 55/129Reading camera 56/129Reading camera 57/129Reading camera 58/129Reading camera 59/129Reading camera 60/129Reading camera 61/129Reading camera 62/129Reading camera 63/129Reading camera 64/129Reading camera 65/129Reading camera 66/129Reading camera 67/129Reading camera 68/129Reading camera 69/129Reading camera 70/129Reading camera 71/129Reading camera 72/129Reading camera 73/129Reading camera 74/129Reading camera 75/129Reading camera 76/129Reading camera 77/129Reading camera 78/129Reading camera 79/129Reading camera 80/129Reading camera 81/129Reading camera 82/129Reading camera 83/129Reading camera 84/129Reading camera 85/129Reading camera 86/129Reading camera 87/129Reading camera 88/129Reading camera 89/129Reading camera 90/129Reading camera 91/129Reading camera 92/129Reading camera 93/129Reading camera 94/129Reading camera 95/129Reading camera 96/129Reading camera 97/129Reading camera 98/129Reading camera 99/129Reading camera 100/129Reading camera 101/129Reading camera 102/129Reading camera 103/129Reading camera 104/129Reading camera 105/129Reading camera 106/129Reading camera 107/129Reading camera 108/129Reading camera 109/129Reading camera 110/129Reading camera 111/129Reading camera 112/129Reading camera 113/129Reading camera 114/129Reading camera 115/129Reading camera 116/129Reading camera 117/129Reading camera 118/129Reading camera 119/129Reading camera 120/129Reading camera 121/129Reading camera 122/129Reading camera 123/129Reading camera 124/129Reading camera 125/129Reading camera 126/129Reading camera 127/129Reading camera 128/129Reading camera 129/1292026-10-15 13:29:52,819 - INFO: [RENO] Fine-tuning enabled: interval=20, lr=0.0001
+ [15/10 13:29:45]
+using lod, using eval [15/10 13:29:45]
+test_cam_infos: 31 [15/10 13:29:45]
+start fetching data from ply file [15/10 13:29:45]
+Loading Training Cameras [15/10 13:29:45]
+[ INFO ] Encountered quite large input images (>1.6K pixels width), rescaling to 1.6K.
+ If this is not desired, please explicitly specify '--resolution/-r' as 1 [15/10 13:29:45]
+Loading Test Cameras [15/10 13:29:50]
+Initial voxel_size: 4.1340379539178684e-05 [15/10 13:29:52]
+Number of points at initialisation :  84303 [15/10 13:29:52]
+anchor_bound_updated [15/10 13:29:52]
+Training progress:   0%|          | 0/30000 [00:00<?, ?it/s]2026-10-15 13:29:54,184 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   0%|          | 0/30000 [00:05<?, ?it/s, Loss=nan]Training progress:   0%|          | 100/30000 [00:05<26:36, 18.73it/s, Loss=nan]2026-10-15 13:30:00,613 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 146; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   0%|          | 100/30000 [00:10<26:36, 18.73it/s, Loss=nan]Training progress:   1%|          | 200/30000 [00:10<25:49, 19.24it/s, Loss=nan]2026-10-15 13:30:03,361 - INFO: [RENO] iter=200 bpp=29.6539 anchor_num=20000
+2026-10-15 13:30:05,438 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 241; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   1%|          | 200/30000 [00:15<25:49, 19.24it/s, Loss=nan]Training progress:   1%|          | 300/30000 [00:15<25:17, 19.57it/s, Loss=nan]2026-10-15 13:30:11,505 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 364; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   1%|          | 300/30000 [00:20<25:17, 19.57it/s, Loss=nan]Training progress:   1%|▏         | 400/30000 [00:20<24:50, 19.85it/s, Loss=nan]2026-10-15 13:30:13,288 - INFO: [RENO] iter=400 bpp=29.2594 anchor_num=20000
+2026-10-15 13:30:13,335 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 401; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   1%|▏         | 400/30000 [00:25<24:50, 19.85it/s, Loss=nan]Training progress:   2%|▏         | 500/30000 [00:25<24:15, 20.27it/s, Loss=nan]2026-10-15 13:30:18,784 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 517; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   2%|▏         | 500/30000 [00:29<24:15, 20.27it/s, Loss=nan]Training progress:   2%|▏         | 600/30000 [00:29<24:02, 20.38it/s, Loss=nan]2026-10-15 13:30:22,896 - INFO: [RENO] iter=600 bpp=29.1062 anchor_num=20000
+2026-10-15 13:30:25,499 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 656; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   2%|▏         | 600/30000 [00:34<24:02, 20.38it/s, Loss=nan]Training progress:   2%|▏         | 700/30000 [00:34<23:45, 20.55it/s, Loss=nan]2026-10-15 13:30:28,894 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 726; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:30:32,014 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 793; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   2%|▏         | 700/30000 [00:39<23:45, 20.55it/s, Loss=nan]Training progress:   3%|▎         | 800/30000 [00:39<23:28, 20.73it/s, Loss=nan]2026-10-15 13:30:32,417 - INFO: [RENO] iter=800 bpp=29.0038 anchor_num=20000
+2026-10-15 13:30:36,591 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 887; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   3%|▎         | 800/30000 [00:44<23:28, 20.73it/s, Loss=nan]Training progress:   3%|▎         | 900/30000 [00:44<23:25, 20.71it/s, Loss=nan]Training progress:   3%|▎         | 900/30000 [00:49<23:25, 20.71it/s, Loss=nan]Training progress:   3%|▎         | 1000/30000 [00:49<23:15, 20.78it/s, Loss=nan]2026-10-15 13:30:42,047 - INFO: [RENO] iter=1000 bpp=28.9583 anchor_num=20000
+2026-10-15 13:30:44,702 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1058; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   3%|▎         | 1000/30000 [00:53<23:15, 20.78it/s, Loss=nan]Training progress:   4%|▎         | 1100/30000 [00:53<23:06, 20.85it/s, Loss=nan]2026-10-15 13:30:48,618 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1140; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   4%|▎         | 1100/30000 [00:58<23:06, 20.85it/s, Loss=nan]Training progress:   4%|▍         | 1200/30000 [00:58<23:01, 20.85it/s, Loss=nan]2026-10-15 13:30:51,605 - INFO: [RENO] iter=1200 bpp=28.9013 anchor_num=20000
+2026-10-15 13:30:53,226 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1236; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   4%|▍         | 1200/30000 [01:03<23:01, 20.85it/s, Loss=nan]Training progress:   4%|▍         | 1300/30000 [01:03<22:53, 20.90it/s, Loss=nan]2026-10-15 13:30:59,579 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1369; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:30:59,985 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1379; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   4%|▍         | 1300/30000 [01:08<22:53, 20.90it/s, Loss=nan]Training progress:   5%|▍         | 1400/30000 [01:08<22:43, 20.97it/s, Loss=nan]2026-10-15 13:31:01,095 - INFO: [RENO] iter=1400 bpp=28.8455 anchor_num=20000
+Training progress:   5%|▍         | 1400/30000 [01:12<22:43, 20.97it/s, Loss=nan]Training progress:   5%|▌         | 1500/30000 [01:12<22:31, 21.09it/s, Loss=nan]2026-10-15 13:31:08,609 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1561; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   5%|▌         | 1500/30000 [01:17<22:31, 21.09it/s, Loss=nan]Training progress:   5%|▌         | 1600/30000 [01:17<22:19, 21.21it/s, Loss=nan]2026-10-15 13:31:10,591 - INFO: [RENO] iter=1600 bpp=29.9234 anchor_num=20000
+2026-10-15 13:31:13,300 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1658; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   5%|▌         | 1600/30000 [01:22<22:19, 21.21it/s, Loss=nan]Training progress:   6%|▌         | 1700/30000 [01:22<22:37, 20.84it/s, Loss=nan]2026-10-15 13:31:17,116 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1733; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:31:18,800 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1767; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   6%|▌         | 1700/30000 [01:27<22:37, 20.84it/s, Loss=nan]Training progress:   6%|▌         | 1800/30000 [01:27<22:51, 20.56it/s, Loss=nan]2026-10-15 13:31:20,659 - INFO: [RENO] iter=1800 bpp=29.2990 anchor_num=20000
+Training progress:   6%|▌         | 1800/30000 [01:32<22:51, 20.56it/s, Loss=nan]Training progress:   6%|▋         | 1900/30000 [01:32<23:07, 20.25it/s, Loss=nan]2026-10-15 13:31:28,457 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 1954; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   6%|▋         | 1900/30000 [01:37<23:07, 20.25it/s, Loss=nan]Training progress:   7%|▋         | 2000/30000 [01:37<23:33, 19.81it/s, Loss=nan]2026-10-15 13:31:31,151 - INFO: [RENO] iter=2000 bpp=28.4633 anchor_num=20000
+2026-10-15 13:31:33,046 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2039; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   7%|▋         | 2000/30000 [01:43<23:33, 19.81it/s, Loss=nan]Training progress:   7%|▋         | 2100/30000 [01:43<24:01, 19.36it/s, Loss=nan]2026-10-15 13:31:37,341 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2117; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   7%|▋         | 2100/30000 [01:48<24:01, 19.36it/s, Loss=nan]Training progress:   7%|▋         | 2200/30000 [01:48<24:19, 19.05it/s, Loss=nan]2026-10-15 13:31:42,088 - INFO: [RENO] iter=2200 bpp=27.7242 anchor_num=20000
+2026-10-15 13:31:44,867 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2254; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:31:47,049 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2296; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   7%|▋         | 2200/30000 [01:54<24:19, 19.05it/s, Loss=nan]Training progress:   8%|▊         | 2300/30000 [01:54<24:44, 18.66it/s, Loss=nan]2026-10-15 13:31:51,499 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2374; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   8%|▊         | 2300/30000 [02:00<24:44, 18.66it/s, Loss=nan]Training progress:   8%|▊         | 2400/30000 [02:00<25:00, 18.40it/s, Loss=nan]2026-10-15 13:31:53,343 - INFO: [RENO] iter=2400 bpp=26.4849 anchor_num=20000
+2026-10-15 13:31:56,440 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2460; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   8%|▊         | 2400/30000 [02:05<25:00, 18.40it/s, Loss=nan]Training progress:   8%|▊         | 2500/30000 [02:05<25:18, 18.11it/s, Loss=nan]Training progress:   8%|▊         | 2500/30000 [02:11<25:18, 18.11it/s, Loss=nan]Training progress:   9%|▊         | 2600/30000 [02:11<25:22, 18.00it/s, Loss=nan]2026-10-15 13:32:04,661 - INFO: [RENO] iter=2600 bpp=30.0612 anchor_num=20000
+2026-10-15 13:32:05,572 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2618; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:32:09,858 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2696; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   9%|▊         | 2600/30000 [02:17<25:22, 18.00it/s, Loss=nan]Training progress:   9%|▉         | 2700/30000 [02:17<25:41, 17.71it/s, Loss=nan]Training progress:   9%|▉         | 2700/30000 [02:22<25:41, 17.71it/s, Loss=nan]Training progress:   9%|▉         | 2800/30000 [02:22<25:41, 17.64it/s, Loss=nan]2026-10-15 13:32:16,325 - INFO: [RENO] iter=2800 bpp=28.2772 anchor_num=20000
+2026-10-15 13:32:16,913 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2812; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:32:18,695 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2844; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:   9%|▉         | 2800/30000 [02:28<25:41, 17.64it/s, Loss=nan]Training progress:  10%|▉         | 2900/30000 [02:28<25:51, 17.46it/s, Loss=nan]2026-10-15 13:32:26,978 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 2990; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  10%|▉         | 2900/30000 [02:34<25:51, 17.46it/s, Loss=nan]Training progress:  10%|█         | 3000/30000 [02:34<25:55, 17.36it/s, Loss=nan]2026-10-15 13:32:27,587 - INFO: [RENO] iter=3000 bpp=26.2393 anchor_num=20000
+2026-10-15 13:32:31,174 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3064; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  10%|█         | 3000/30000 [02:40<25:55, 17.36it/s, Loss=nan]Training progress:  10%|█         | 3100/30000 [02:40<25:42, 17.44it/s, Loss=nan]Training progress:  10%|█         | 3100/30000 [02:46<25:42, 17.44it/s, Loss=nan]Training progress:  11%|█         | 3200/30000 [02:46<25:46, 17.32it/s, Loss=nan]2026-10-15 13:32:39,121 - INFO: [RENO] iter=3200 bpp=24.8481 anchor_num=20000
+2026-10-15 13:32:40,936 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3232; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:32:41,681 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3244; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  11%|█         | 3200/30000 [02:52<25:46, 17.32it/s, Loss=nan]Training progress:  11%|█         | 3300/30000 [02:52<25:48, 17.24it/s, Loss=nan]2026-10-15 13:32:50,014 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3384; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  11%|█         | 3300/30000 [02:58<25:48, 17.24it/s, Loss=nan]Training progress:  11%|█▏        | 3400/30000 [02:58<25:59, 17.05it/s, Loss=nan]2026-10-15 13:32:51,000 - INFO: [RENO] iter=3400 bpp=23.9644 anchor_num=20000
+2026-10-15 13:32:56,143 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3486; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  11%|█▏        | 3400/30000 [03:04<25:59, 17.05it/s, Loss=nan]Training progress:  12%|█▏        | 3500/30000 [03:04<26:04, 16.94it/s, Loss=nan]2026-10-15 13:32:59,093 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3537; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  12%|█▏        | 3500/30000 [03:10<26:04, 16.94it/s, Loss=nan]Training progress:  12%|█▏        | 3600/30000 [03:10<26:04, 16.87it/s, Loss=nan]2026-10-15 13:33:02,976 - INFO: [RENO] iter=3600 bpp=23.4812 anchor_num=20000
+Training progress:  12%|█▏        | 3600/30000 [03:15<26:04, 16.87it/s, Loss=nan]Training progress:  12%|█▏        | 3700/30000 [03:15<25:57, 16.89it/s, Loss=nan]2026-10-15 13:33:09,132 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3704; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:33:12,915 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3766; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  12%|█▏        | 3700/30000 [03:22<25:57, 16.89it/s, Loss=nan]Training progress:  13%|█▎        | 3800/30000 [03:22<26:06, 16.73it/s, Loss=nan]2026-10-15 13:33:15,011 - INFO: [RENO] iter=3800 bpp=23.0890 anchor_num=20000
+2026-10-15 13:33:17,678 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 3845; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  13%|█▎        | 3800/30000 [03:28<26:06, 16.73it/s, Loss=nan]Training progress:  13%|█▎        | 3900/30000 [03:28<26:00, 16.73it/s, Loss=nan]Training progress:  13%|█▎        | 3900/30000 [03:34<26:00, 16.73it/s, Loss=nan]Training progress:  13%|█▎        | 4000/30000 [03:34<26:03, 16.62it/s, Loss=nan]2026-10-15 13:33:27,572 - INFO: [RENO] iter=4000 bpp=24.4963 anchor_num=20000
+2026-10-15 13:33:28,275 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4013; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:33:33,341 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4095; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  13%|█▎        | 4000/30000 [03:40<26:03, 16.62it/s, Loss=nan]Training progress:  14%|█▎        | 4100/30000 [03:40<26:49, 16.10it/s, Loss=nan]2026-10-15 13:33:38,130 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4167; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  14%|█▎        | 4100/30000 [03:47<26:49, 16.10it/s, Loss=nan]Training progress:  14%|█▍        | 4200/30000 [03:47<27:01, 15.91it/s, Loss=nan]2026-10-15 13:33:40,615 - INFO: [RENO] iter=4200 bpp=23.8916 anchor_num=20000
+2026-10-15 13:33:45,053 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4273; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  14%|█▍        | 4200/30000 [03:53<27:01, 15.91it/s, Loss=nan]Training progress:  14%|█▍        | 4300/30000 [03:53<27:24, 15.63it/s, Loss=nan]2026-10-15 13:33:51,163 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4363; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  14%|█▍        | 4300/30000 [04:00<27:24, 15.63it/s, Loss=nan]Training progress:  15%|█▍        | 4400/30000 [04:00<27:33, 15.48it/s, Loss=nan]2026-10-15 13:33:53,920 - INFO: [RENO] iter=4400 bpp=23.4878 anchor_num=20000
+2026-10-15 13:33:59,368 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4487; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  15%|█▍        | 4400/30000 [04:07<27:33, 15.48it/s, Loss=nan]Training progress:  15%|█▌        | 4500/30000 [04:07<27:49, 15.27it/s, Loss=nan]2026-10-15 13:34:03,188 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4541; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  15%|█▌        | 4500/30000 [04:14<27:49, 15.27it/s, Loss=nan]Training progress:  15%|█▌        | 4600/30000 [04:14<27:55, 15.16it/s, Loss=nan]2026-10-15 13:34:07,365 - INFO: [RENO] iter=4600 bpp=23.2655 anchor_num=20000
+2026-10-15 13:34:07,852 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4608; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  15%|█▌        | 4600/30000 [04:20<27:55, 15.16it/s, Loss=nan]Training progress:  16%|█▌        | 4700/30000 [04:20<28:09, 14.97it/s, Loss=nan]2026-10-15 13:34:16,636 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4739; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  16%|█▌        | 4700/30000 [04:27<28:09, 14.97it/s, Loss=nan]Training progress:  16%|█▌        | 4800/30000 [04:27<28:13, 14.88it/s, Loss=nan]2026-10-15 13:34:21,053 - INFO: [RENO] iter=4800 bpp=23.1126 anchor_num=20000
+2026-10-15 13:34:22,285 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4820; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  16%|█▌        | 4800/30000 [04:34<28:13, 14.88it/s, Loss=nan]Training progress:  16%|█▋        | 4900/30000 [04:34<28:25, 14.72it/s, Loss=nan]2026-10-15 13:34:31,604 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 4957; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  16%|█▋        | 4900/30000 [04:41<28:25, 14.72it/s, Loss=nan]Training progress:  17%|█▋        | 5000/30000 [04:41<28:27, 14.64it/s, Loss=nan]2026-10-15 13:34:34,898 - INFO: [RENO] iter=5000 bpp=22.9127 anchor_num=20000
+2026-10-15 13:34:39,800 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5075; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  17%|█▋        | 5000/30000 [04:48<28:27, 14.64it/s, Loss=nan]Training progress:  17%|█▋        | 5100/30000 [04:48<28:31, 14.55it/s, Loss=nan]2026-10-15 13:34:46,962 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5179; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  17%|█▋        | 5100/30000 [04:55<28:31, 14.55it/s, Loss=nan]Training progress:  17%|█▋        | 5200/30000 [04:55<28:26, 14.53it/s, Loss=nan]2026-10-15 13:34:48,820 - INFO: [RENO] iter=5200 bpp=22.7658 anchor_num=20000
+2026-10-15 13:34:49,626 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5213; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  17%|█▋        | 5200/30000 [05:02<28:26, 14.53it/s, Loss=nan]Training progress:  18%|█▊        | 5300/30000 [05:02<28:32, 14.42it/s, Loss=nan]2026-10-15 13:34:56,605 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5313; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  18%|█▊        | 5300/30000 [05:09<28:32, 14.42it/s, Loss=nan]Training progress:  18%|█▊        | 5400/30000 [05:09<28:28, 14.40it/s, Loss=nan]2026-10-15 13:35:02,810 - INFO: [RENO] iter=5400 bpp=22.5922 anchor_num=20000
+2026-10-15 13:35:03,769 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5415; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  18%|█▊        | 5400/30000 [05:16<28:28, 14.40it/s, Loss=nan]Training progress:  18%|█▊        | 5500/30000 [05:16<28:30, 14.33it/s, Loss=nan]2026-10-15 13:35:14,721 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5575; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  18%|█▊        | 5500/30000 [05:23<28:30, 14.33it/s, Loss=nan]Training progress:  19%|█▊        | 5600/30000 [05:23<28:22, 14.33it/s, Loss=nan]2026-10-15 13:35:16,833 - INFO: [RENO] iter=5600 bpp=22.5236 anchor_num=20000
+2026-10-15 13:35:19,457 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5640; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  19%|█▊        | 5600/30000 [05:30<28:22, 14.33it/s, Loss=nan]Training progress:  19%|█▉        | 5700/30000 [05:30<28:25, 14.25it/s, Loss=nan]2026-10-15 13:35:26,642 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5741; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  19%|█▉        | 5700/30000 [05:37<28:25, 14.25it/s, Loss=nan]Training progress:  19%|█▉        | 5800/30000 [05:37<28:11, 14.31it/s, Loss=nan]2026-10-15 13:35:30,884 - INFO: [RENO] iter=5800 bpp=23.8975 anchor_num=20000
+2026-10-15 13:35:34,236 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5849; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  19%|█▉        | 5800/30000 [05:44<28:11, 14.31it/s, Loss=nan]Training progress:  20%|█▉        | 5900/30000 [05:44<28:17, 14.19it/s, Loss=nan]2026-10-15 13:35:42,831 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5972; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:35:43,341 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 5980; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  20%|█▉        | 5900/30000 [05:51<28:17, 14.19it/s, Loss=nan]Training progress:  20%|██        | 6000/30000 [05:51<28:18, 14.13it/s, Loss=nan]2026-10-15 13:35:45,201 - INFO: [RENO] iter=6000 bpp=23.4033 anchor_num=20000
+Training progress:  20%|██        | 6000/30000 [05:59<28:18, 14.13it/s, Loss=nan]Training progress:  20%|██        | 6100/30000 [05:59<28:14, 14.10it/s, Loss=nan]2026-10-15 13:35:54,615 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6135; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  20%|██        | 6100/30000 [06:06<28:14, 14.10it/s, Loss=nan]Training progress:  21%|██        | 6200/30000 [06:06<28:13, 14.05it/s, Loss=nan]2026-10-15 13:35:59,512 - INFO: [RENO] iter=6200 bpp=22.9850 anchor_num=20000
+2026-10-15 13:36:03,910 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6265; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  21%|██        | 6200/30000 [06:13<28:13, 14.05it/s, Loss=nan]Training progress:  21%|██        | 6300/30000 [06:13<28:09, 14.03it/s, Loss=nan]2026-10-15 13:36:11,064 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6365; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  21%|██        | 6300/30000 [06:20<28:09, 14.03it/s, Loss=nan]Training progress:  21%|██▏       | 6400/30000 [06:20<28:10, 13.96it/s, Loss=nan]2026-10-15 13:36:13,918 - INFO: [RENO] iter=6400 bpp=22.6956 anchor_num=20000
+2026-10-15 13:36:15,895 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6431; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  21%|██▏       | 6400/30000 [06:27<28:10, 13.96it/s, Loss=nan]Training progress:  22%|██▏       | 6500/30000 [06:27<28:04, 13.95it/s, Loss=nan]2026-10-15 13:36:23,483 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6537; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  22%|██▏       | 6500/30000 [06:34<28:04, 13.95it/s, Loss=nan]Training progress:  22%|██▏       | 6600/30000 [06:34<27:52, 13.99it/s, Loss=nan]2026-10-15 13:36:28,177 - INFO: [RENO] iter=6600 bpp=22.5606 anchor_num=20000
+2026-10-15 13:36:31,065 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6642; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  22%|██▏       | 6600/30000 [06:42<27:52, 13.99it/s, Loss=nan]Training progress:  22%|██▏       | 6700/30000 [06:42<27:58, 13.88it/s, Loss=nan]2026-10-15 13:36:39,574 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6761; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  22%|██▏       | 6700/30000 [06:49<27:58, 13.88it/s, Loss=nan]Training progress:  23%|██▎       | 6800/30000 [06:49<27:35, 14.01it/s, Loss=nan]2026-10-15 13:36:42,477 - INFO: [RENO] iter=6800 bpp=22.3029 anchor_num=20000
+2026-10-15 13:36:45,565 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6844; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:36:47,649 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 6875; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  23%|██▎       | 6800/30000 [06:56<27:35, 14.01it/s, Loss=nan]Training progress:  23%|██▎       | 6900/30000 [06:56<27:53, 13.80it/s, Loss=nan]Training progress:  23%|██▎       | 6900/30000 [07:03<27:53, 13.80it/s, Loss=nan]Training progress:  23%|██▎       | 7000/30000 [07:03<27:34, 13.90it/s, Loss=nan]2026-10-15 13:36:57,043 - INFO: [RENO] iter=7000 bpp=22.1249 anchor_num=20000
+2026-10-15 13:36:57,941 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7014; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:37:03,386 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7093; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  23%|██▎       | 7000/30000 [07:11<27:34, 13.90it/s, Loss=nan]Training progress:  24%|██▎       | 7100/30000 [07:11<27:31, 13.86it/s, Loss=nan]2026-10-15 13:37:09,529 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7177; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  24%|██▎       | 7100/30000 [07:18<27:31, 13.86it/s, Loss=nan]Training progress:  24%|██▍       | 7200/30000 [07:18<27:29, 13.82it/s, Loss=nan]2026-10-15 13:37:11,605 - INFO: [RENO] iter=7200 bpp=22.0325 anchor_num=20000
+Training progress:  24%|██▍       | 7200/30000 [07:25<27:29, 13.82it/s, Loss=nan]Training progress:  24%|██▍       | 7300/30000 [07:25<27:29, 13.76it/s, Loss=nan]2026-10-15 13:37:21,309 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7334; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:37:23,608 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7366; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  24%|██▍       | 7300/30000 [07:33<27:29, 13.76it/s, Loss=nan]Training progress:  25%|██▍       | 7400/30000 [07:33<27:37, 13.64it/s, Loss=nan]2026-10-15 13:37:26,461 - INFO: [RENO] iter=7400 bpp=21.9050 anchor_num=20000
+2026-10-15 13:37:33,080 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7493; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  25%|██▍       | 7400/30000 [07:40<27:37, 13.64it/s, Loss=nan]Training progress:  25%|██▌       | 7500/30000 [07:40<27:45, 13.51it/s, Loss=nan]Training progress:  25%|██▌       | 7500/30000 [07:47<27:45, 13.51it/s, Loss=nan]Training progress:  25%|██▌       | 7600/30000 [07:47<27:27, 13.59it/s, Loss=nan]2026-10-15 13:37:41,256 - INFO: [RENO] iter=7600 bpp=21.7557 anchor_num=20000
+2026-10-15 13:37:43,186 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7626; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  25%|██▌       | 7600/30000 [07:55<27:27, 13.59it/s, Loss=nan]Training progress:  26%|██▌       | 7700/30000 [07:55<27:41, 13.42it/s, Loss=nan]2026-10-15 13:37:49,459 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7708; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  26%|██▌       | 7700/30000 [08:02<27:41, 13.42it/s, Loss=nan]Training progress:  26%|██▌       | 7800/30000 [08:02<27:29, 13.46it/s, Loss=nan]2026-10-15 13:37:56,164 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7800; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:37:56,266 - INFO: [RENO] iter=7800 bpp=21.7090 anchor_num=20000
+Training progress:  26%|██▌       | 7800/30000 [08:10<27:29, 13.46it/s, Loss=nan]Training progress:  26%|██▋       | 7900/30000 [08:10<27:24, 13.44it/s, Loss=nan]2026-10-15 13:38:03,954 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 7902; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  26%|██▋       | 7900/30000 [08:17<27:24, 13.44it/s, Loss=nan]Training progress:  27%|██▋       | 8000/30000 [08:17<27:12, 13.48it/s, Loss=nan]2026-10-15 13:38:11,024 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8000; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:38:11,122 - INFO: [RENO] iter=8000 bpp=21.7048 anchor_num=20000
+Training progress:  27%|██▋       | 8000/30000 [08:25<27:12, 13.48it/s, Loss=nan]Training progress:  27%|██▋       | 8100/30000 [08:25<26:58, 13.53it/s, Loss=nan]2026-10-15 13:38:19,197 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8111; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  27%|██▋       | 8100/30000 [08:32<26:58, 13.53it/s, Loss=nan]Training progress:  27%|██▋       | 8200/30000 [08:32<26:47, 13.56it/s, Loss=nan]2026-10-15 13:38:25,785 - INFO: [RENO] iter=8200 bpp=21.6313 anchor_num=20000
+2026-10-15 13:38:26,735 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8213; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  27%|██▋       | 8200/30000 [08:39<26:47, 13.56it/s, Loss=nan]Training progress:  28%|██▊       | 8300/30000 [08:39<26:48, 13.49it/s, Loss=nan]2026-10-15 13:38:35,236 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8329; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  28%|██▊       | 8300/30000 [08:47<26:48, 13.49it/s, Loss=nan]Training progress:  28%|██▊       | 8400/30000 [08:47<26:39, 13.51it/s, Loss=nan]2026-10-15 13:38:40,626 - INFO: [RENO] iter=8400 bpp=21.6508 anchor_num=20000
+2026-10-15 13:38:41,822 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8418; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:38:46,380 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8483; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  28%|██▊       | 8400/30000 [08:54<26:39, 13.51it/s, Loss=nan]Training progress:  28%|██▊       | 8500/30000 [08:54<26:27, 13.54it/s, Loss=nan]2026-10-15 13:38:53,157 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8574; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  28%|██▊       | 8500/30000 [09:02<26:27, 13.54it/s, Loss=nan]Training progress:  29%|██▊       | 8600/30000 [09:02<26:23, 13.52it/s, Loss=nan]2026-10-15 13:38:55,407 - INFO: [RENO] iter=8600 bpp=21.7057 anchor_num=20000
+2026-10-15 13:39:01,371 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8686; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  29%|██▊       | 8600/30000 [09:09<26:23, 13.52it/s, Loss=nan]Training progress:  29%|██▉       | 8700/30000 [09:09<26:13, 13.54it/s, Loss=nan]Training progress:  29%|██▉       | 8700/30000 [09:16<26:13, 13.54it/s, Loss=nan]Training progress:  29%|██▉       | 8800/30000 [09:16<26:04, 13.55it/s, Loss=nan]2026-10-15 13:39:10,138 - INFO: [RENO] iter=8800 bpp=21.6487 anchor_num=20000
+2026-10-15 13:39:10,681 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8807; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:39:13,886 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8850; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  29%|██▉       | 8800/30000 [09:24<26:04, 13.55it/s, Loss=nan]Training progress:  30%|██▉       | 8900/30000 [09:24<26:10, 13.43it/s, Loss=nan]2026-10-15 13:39:24,480 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 8999; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  30%|██▉       | 8900/30000 [09:31<26:10, 13.43it/s, Loss=nan]Training progress:  30%|███       | 9000/30000 [09:31<25:51, 13.54it/s, Loss=nan]2026-10-15 13:39:24,974 - INFO: [RENO] iter=9000 bpp=21.5631 anchor_num=20000
+2026-10-15 13:39:29,547 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9064; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  30%|███       | 9000/30000 [09:39<25:51, 13.54it/s, Loss=nan]Training progress:  30%|███       | 9100/30000 [09:39<25:45, 13.53it/s, Loss=nan]2026-10-15 13:39:37,931 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9179; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  30%|███       | 9100/30000 [09:46<25:45, 13.53it/s, Loss=nan]Training progress:  31%|███       | 9200/30000 [09:46<25:40, 13.50it/s, Loss=nan]2026-10-15 13:39:39,819 - INFO: [RENO] iter=9200 bpp=21.5514 anchor_num=20000
+2026-10-15 13:39:45,824 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9284; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  31%|███       | 9200/30000 [09:54<25:40, 13.50it/s, Loss=nan]Training progress:  31%|███       | 9300/30000 [09:54<25:37, 13.47it/s, Loss=nan]2026-10-15 13:39:53,772 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9392; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  31%|███       | 9300/30000 [10:01<25:37, 13.47it/s, Loss=nan]Training progress:  31%|███▏      | 9400/30000 [10:01<25:32, 13.44it/s, Loss=nan]2026-10-15 13:39:54,754 - INFO: [RENO] iter=9400 bpp=21.5337 anchor_num=20000
+2026-10-15 13:39:58,388 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9451; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  31%|███▏      | 9400/30000 [10:08<25:32, 13.44it/s, Loss=nan]Training progress:  32%|███▏      | 9500/30000 [10:08<25:28, 13.41it/s, Loss=nan]2026-10-15 13:40:06,359 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9561; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  32%|███▏      | 9500/30000 [10:16<25:28, 13.41it/s, Loss=nan]Training progress:  32%|███▏      | 9600/30000 [10:16<25:15, 13.46it/s, Loss=nan]2026-10-15 13:40:09,629 - INFO: [RENO] iter=9600 bpp=21.5087 anchor_num=20000
+2026-10-15 13:40:10,458 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9613; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  32%|███▏      | 9600/30000 [10:23<25:15, 13.46it/s, Loss=nan]Training progress:  32%|███▏      | 9700/30000 [10:23<25:11, 13.43it/s, Loss=nan]2026-10-15 13:40:19,750 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9739; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  32%|███▏      | 9700/30000 [10:31<25:11, 13.43it/s, Loss=nan]Training progress:  33%|███▎      | 9800/30000 [10:31<25:03, 13.44it/s, Loss=nan]2026-10-15 13:40:24,554 - INFO: [RENO] iter=9800 bpp=23.5595 anchor_num=20000
+2026-10-15 13:40:31,450 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9898; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  33%|███▎      | 9800/30000 [10:38<25:03, 13.44it/s, Loss=nan]Training progress:  33%|███▎      | 9900/30000 [10:38<25:00, 13.39it/s, Loss=nan]2026-10-15 13:40:37,659 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 9980; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  33%|███▎      | 9900/30000 [10:46<25:00, 13.39it/s, Loss=nan]Training progress:  33%|███▎      | 10000/30000 [10:46<24:54, 13.39it/s, Loss=nan]2026-10-15 13:40:39,560 - INFO: [RENO] iter=10000 bpp=23.0054 anchor_num=20000
+Training progress:  33%|███▎      | 10000/30000 [11:00<24:54, 13.39it/s, Loss=nan]2026-10-15 13:40:54,780 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10024; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:40:59,214 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10031; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:41:29,696 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10079; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  33%|███▎      | 10000/30000 [11:50<24:54, 13.39it/s, Loss=nan]Training progress:  34%|███▎      | 10100/30000 [11:50<1:20:47,  4.10it/s, Loss=nan]2026-10-15 13:41:50,227 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10110; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  34%|███▎      | 10100/30000 [12:53<1:20:47,  4.10it/s, Loss=nan]Training progress:  34%|███▍      | 10200/30000 [12:53<1:59:08,  2.77it/s, Loss=nan]2026-10-15 13:42:46,771 - INFO: [RENO] iter=10200 bpp=22.5823 anchor_num=20000
+2026-10-15 13:43:18,470 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10251; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  34%|███▍      | 10200/30000 [13:57<1:59:08,  2.77it/s, Loss=nan]Training progress:  34%|███▍      | 10300/30000 [13:57<2:25:45,  2.25it/s, Loss=nan]2026-10-15 13:44:22,637 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10344; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:44:55,123 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10394; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  34%|███▍      | 10300/30000 [15:05<2:25:45,  2.25it/s, Loss=nan]Training progress:  35%|███▍      | 10400/30000 [15:05<2:48:44,  1.94it/s, Loss=nan]2026-10-15 13:44:59,120 - INFO: [RENO] iter=10400 bpp=22.2865 anchor_num=20000
+Training progress:  35%|███▍      | 10400/30000 [16:10<2:48:44,  1.94it/s, Loss=nan]Training progress:  35%|███▌      | 10500/30000 [16:10<3:00:18,  1.80it/s, Loss=nan]2026-10-15 13:46:36,659 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10552; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  35%|███▌      | 10500/30000 [17:14<3:00:18,  1.80it/s, Loss=nan]Training progress:  35%|███▌      | 10600/30000 [17:14<3:08:15,  1.72it/s, Loss=nan]2026-10-15 13:47:08,173 - INFO: [RENO] iter=10600 bpp=22.1563 anchor_num=20000
+2026-10-15 13:47:15,576 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10612; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  35%|███▌      | 10600/30000 [18:18<3:08:15,  1.72it/s, Loss=nan]Training progress:  36%|███▌      | 10700/30000 [18:18<3:12:44,  1.67it/s, Loss=nan]2026-10-15 13:48:49,064 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10758; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  36%|███▌      | 10700/30000 [19:22<3:12:44,  1.67it/s, Loss=nan]Training progress:  36%|███▌      | 10800/30000 [19:22<3:15:37,  1.64it/s, Loss=nan]2026-10-15 13:49:15,985 - INFO: [RENO] iter=10800 bpp=22.0735 anchor_num=20000
+2026-10-15 13:49:50,887 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10855; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  36%|███▌      | 10800/30000 [20:26<3:15:37,  1.64it/s, Loss=nan]Training progress:  36%|███▋      | 10900/30000 [20:26<3:16:47,  1.62it/s, Loss=nan]2026-10-15 13:50:50,525 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10944; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:51:29,911 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 13:51:29,912 - INFO: 
+-----[ITER 11000] bits info (accurate): ttl_size_feat_MB=5.170785853639245, ttl_size_scaling_MB=3.3836775706149638, ttl_size_offsets_MB=4.285654295235872, ttl_size_MB=12.840117719490081-----
+2026-10-15 13:51:29,912 - INFO: 
+-----[ITER 11000] bits info (approx from visible): bit_per_feat_param=1.8752351999282837, ttl_size_feat_MB_approx=5.2033110957253825-----
+2026-10-15 13:51:29,912 - INFO: 
+-----[ITER 11000] bits info: anchor_num=465526-----
+2026-10-15 13:51:29,912 - INFO: 
+-----[ITER 11000] bits info: 1_rate_mask=0.9945996999740601, mask_numel=465526, mask_size_MB=0.0026925106067210436-----
+2026-10-15 13:51:29,917 - INFO: 
+-----[ITER 11000] RENO anchor rate term: avg_bpp_per_anchor=22.1291 (raw=22.0021), anchor_count_soft=463012.0-----
+Training progress:  36%|███▋      | 10900/30000 [21:37<3:16:47,  1.62it/s, Loss=nan]Training progress:  37%|███▋      | 11000/30000 [21:37<3:24:32,  1.55it/s, Loss=nan]2026-10-15 13:51:30,508 - INFO: [RENO] iter=11000 bpp=21.9885 anchor_num=20000
+2026-10-15 13:52:08,373 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11060; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  37%|███▋      | 11000/30000 [22:41<3:24:32,  1.55it/s, Loss=nan]Training progress:  37%|███▋      | 11100/30000 [22:41<3:22:51,  1.55it/s, Loss=nan]2026-10-15 13:52:59,350 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11139; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:53:33,144 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11193; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  37%|███▋      | 11100/30000 [23:44<3:22:51,  1.55it/s, Loss=nan]Training progress:  37%|███▋      | 11200/30000 [23:44<3:20:42,  1.56it/s, Loss=nan]2026-10-15 13:53:37,683 - INFO: [RENO] iter=11200 bpp=21.9452 anchor_num=20000
+Training progress:  37%|███▋      | 11200/30000 [24:49<3:20:42,  1.56it/s, Loss=nan]Training progress:  38%|███▊      | 11300/30000 [24:49<3:20:12,  1.56it/s, Loss=nan]2026-10-15 13:55:07,565 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11339; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+/root/HAC-pluse_research/scene/gaussian_model.py:183: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /pytorch/aten/src/ATen/native/ReduceOps.cpp:1857.)
+  self._last_gate_std = gate.std(dim=0).detach()
+2026-10-15 13:55:28,517 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11371; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  38%|███▊      | 11300/30000 [25:54<3:20:12,  1.56it/s, Loss=nan]Training progress:  38%|███▊      | 11400/30000 [25:54<3:20:11,  1.55it/s, Loss=nan]2026-10-15 13:55:47,720 - INFO: [RENO] iter=11400 bpp=21.8874 anchor_num=20000
+2026-10-15 13:56:33,525 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11471; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  38%|███▊      | 11400/30000 [26:59<3:20:11,  1.55it/s, Loss=nan]Training progress:  38%|███▊      | 11500/30000 [26:59<3:19:07,  1.55it/s, Loss=nan]Training progress:  38%|███▊      | 11500/30000 [28:08<3:19:07,  1.55it/s, Loss=nan]Training progress:  39%|███▊      | 11600/30000 [28:08<3:22:14,  1.52it/s, Loss=nan]2026-10-15 13:58:01,463 - INFO: [RENO] iter=11600 bpp=21.8063 anchor_num=20000
+2026-10-15 13:58:25,058 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11637; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 13:58:56,837 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11686; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  39%|███▊      | 11600/30000 [29:13<3:22:14,  1.52it/s, Loss=nan]Training progress:  39%|███▉      | 11700/30000 [29:13<3:20:14,  1.52it/s, Loss=nan]Training progress:  39%|███▉      | 11700/30000 [30:17<3:20:14,  1.52it/s, Loss=nan]Training progress:  39%|███▉      | 11800/30000 [30:17<3:18:20,  1.53it/s, Loss=nan]2026-10-15 14:00:11,164 - INFO: [RENO] iter=11800 bpp=21.9428 anchor_num=20000
+2026-10-15 14:00:12,731 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11802; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  39%|███▉      | 11800/30000 [31:21<3:18:20,  1.53it/s, Loss=nan]Training progress:  40%|███▉      | 11900/30000 [31:21<3:15:52,  1.54it/s, Loss=nan]2026-10-15 14:01:48,296 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11951; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:02:20,640 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 14:02:20,640 - INFO: 
+-----[ITER 12000] bits info (accurate): ttl_size_feat_MB=5.360763365402818, ttl_size_scaling_MB=3.0669243838638067, ttl_size_offsets_MB=3.291788622736931, ttl_size_MB=11.719476372003555-----
+2026-10-15 14:02:20,641 - INFO: 
+-----[ITER 12000] bits info (approx from visible): bit_per_feat_param=1.9401663541793823, ttl_size_feat_MB_approx=5.514606407199807-----
+2026-10-15 14:02:20,641 - INFO: 
+-----[ITER 12000] bits info: anchor_num=476865-----
+2026-10-15 14:02:20,641 - INFO: 
+-----[ITER 12000] bits info: 1_rate_mask=0.9720759987831116, mask_numel=476865, mask_size_MB=0.010456323623657227-----
+2026-10-15 14:02:20,646 - INFO: 
+-----[ITER 12000] RENO anchor rate term: avg_bpp_per_anchor=21.9796 (raw=21.8148), anchor_count_soft=463549.0-----
+Training progress:  40%|███▉      | 11900/30000 [32:28<3:15:52,  1.54it/s, Loss=nan]Training progress:  40%|████      | 12000/30000 [32:28<3:15:58,  1.53it/s, Loss=nan]2026-10-15 14:02:21,288 - INFO: [RENO] iter=12000 bpp=21.9212 anchor_num=20000
+2026-10-15 14:02:26,539 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12008; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  40%|████      | 12000/30000 [33:30<3:15:58,  1.53it/s, Loss=nan]Training progress:  40%|████      | 12100/30000 [33:30<3:12:26,  1.55it/s, Loss=nan]2026-10-15 14:03:27,980 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12106; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  40%|████      | 12100/30000 [34:40<3:12:26,  1.55it/s, Loss=nan]Training progress:  41%|████      | 12200/30000 [34:40<3:16:23,  1.51it/s, Loss=nan]2026-10-15 14:04:34,017 - INFO: [RENO] iter=12200 bpp=21.8283 anchor_num=20000
+2026-10-15 14:04:46,715 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12219; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  41%|████      | 12200/30000 [35:44<3:16:23,  1.51it/s, Loss=nan]Training progress:  41%|████      | 12300/30000 [35:44<3:12:46,  1.53it/s, Loss=nan]2026-10-15 14:05:57,037 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12330; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:06:13,700 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12356; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  41%|████      | 12300/30000 [36:48<3:12:46,  1.53it/s, Loss=nan]Training progress:  41%|████▏     | 12400/30000 [36:48<3:10:26,  1.54it/s, Loss=nan]2026-10-15 14:06:41,355 - INFO: [RENO] iter=12400 bpp=21.8290 anchor_num=20000
+Training progress:  41%|████▏     | 12400/30000 [37:51<3:10:26,  1.54it/s, Loss=nan]Training progress:  42%|████▏     | 12500/30000 [37:51<3:07:57,  1.55it/s, Loss=nan]2026-10-15 14:07:47,162 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12504; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:08:20,390 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12556; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  42%|████▏     | 12500/30000 [38:54<3:07:57,  1.55it/s, Loss=nan]Training progress:  42%|████▏     | 12600/30000 [38:54<3:05:40,  1.56it/s, Loss=nan]2026-10-15 14:08:47,742 - INFO: [RENO] iter=12600 bpp=21.7783 anchor_num=20000
+Training progress:  42%|████▏     | 12600/30000 [39:58<3:05:40,  1.56it/s, Loss=nan]Training progress:  42%|████▏     | 12700/30000 [39:58<3:04:22,  1.56it/s, Loss=nan]2026-10-15 14:10:09,833 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12730; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:10:28,164 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12760; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  42%|████▏     | 12700/30000 [41:02<3:04:22,  1.56it/s, Loss=nan]Training progress:  43%|████▎     | 12800/30000 [41:02<3:03:50,  1.56it/s, Loss=nan]2026-10-15 14:10:56,039 - INFO: [RENO] iter=12800 bpp=21.7891 anchor_num=20000
+2026-10-15 14:11:43,209 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12870; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  43%|████▎     | 12800/30000 [42:08<3:03:50,  1.56it/s, Loss=nan]Training progress:  43%|████▎     | 12900/30000 [42:08<3:03:44,  1.55it/s, Loss=nan]2026-10-15 14:12:43,040 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 12968; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:13:04,312 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 14:13:04,313 - INFO: 
+-----[ITER 13000] bits info (accurate): ttl_size_feat_MB=4.956976724788547, ttl_size_scaling_MB=2.646964680403471, ttl_size_offsets_MB=2.673599706031382, ttl_size_MB=10.2775411112234-----
+2026-10-15 14:13:04,313 - INFO: 
+-----[ITER 13000] bits info (approx from visible): bit_per_feat_param=1.8734354972839355, ttl_size_feat_MB_approx=5.463679161465507-----
+2026-10-15 14:13:04,313 - INFO: 
+-----[ITER 13000] bits info: anchor_num=489290-----
+2026-10-15 14:13:04,314 - INFO: 
+-----[ITER 13000] bits info: 1_rate_mask=0.904320478439331, mask_numel=489290, mask_size_MB=0.026551660150289536-----
+2026-10-15 14:13:04,319 - INFO: 
+-----[ITER 13000] RENO anchor rate term: avg_bpp_per_anchor=21.8950 (raw=21.8531), anchor_count_soft=442475.0-----
+Training progress:  43%|████▎     | 12900/30000 [43:11<3:03:44,  1.55it/s, Loss=nan]Training progress:  43%|████▎     | 13000/30000 [43:11<3:01:55,  1.56it/s, Loss=nan]2026-10-15 14:13:04,901 - INFO: [RENO] iter=13000 bpp=21.9089 anchor_num=20000
+2026-10-15 14:13:50,080 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13072; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  43%|████▎     | 13000/30000 [44:13<3:01:55,  1.56it/s, Loss=nan]Training progress:  44%|████▎     | 13100/30000 [44:13<2:59:15,  1.57it/s, Loss=nan]2026-10-15 14:15:03,753 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13191; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  44%|████▎     | 13100/30000 [45:16<2:59:15,  1.57it/s, Loss=nan]Training progress:  44%|████▍     | 13200/30000 [45:16<2:57:17,  1.58it/s, Loss=nan]2026-10-15 14:15:09,829 - INFO: [RENO] iter=13200 bpp=20.1374 anchor_num=20000
+Training progress:  44%|████▍     | 13200/30000 [46:17<2:57:17,  1.58it/s, Loss=nan]Training progress:  44%|████▍     | 13300/30000 [46:17<2:54:24,  1.60it/s, Loss=nan]2026-10-15 14:16:14,095 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13305; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  44%|████▍     | 13300/30000 [47:19<2:54:24,  1.60it/s, Loss=nan]Training progress:  45%|████▍     | 13400/30000 [47:19<2:53:00,  1.60it/s, Loss=nan]2026-10-15 14:17:13,156 - INFO: [RENO] iter=13400 bpp=19.9176 anchor_num=20000
+2026-10-15 14:17:18,547 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13409; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:17:57,171 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13467; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  45%|████▍     | 13400/30000 [48:27<2:53:00,  1.60it/s, Loss=nan]Training progress:  45%|████▌     | 13500/30000 [48:27<2:55:53,  1.56it/s, Loss=nan]Training progress:  45%|████▌     | 13500/30000 [49:32<2:55:53,  1.56it/s, Loss=nan]Training progress:  45%|████▌     | 13600/30000 [49:32<2:55:47,  1.55it/s, Loss=nan]2026-10-15 14:19:25,631 - INFO: [RENO] iter=13600 bpp=19.5937 anchor_num=20000
+2026-10-15 14:19:32,895 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13611; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:20:09,175 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13669; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  45%|████▌     | 13600/30000 [50:36<2:55:47,  1.55it/s, Loss=nan]Training progress:  46%|████▌     | 13700/30000 [50:36<2:54:22,  1.56it/s, Loss=nan]2026-10-15 14:21:23,385 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13785; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  46%|████▌     | 13700/30000 [51:39<2:54:22,  1.56it/s, Loss=nan]Training progress:  46%|████▌     | 13800/30000 [51:39<2:52:52,  1.56it/s, Loss=nan]2026-10-15 14:21:33,148 - INFO: [RENO] iter=13800 bpp=19.6460 anchor_num=20000
+2026-10-15 14:22:10,397 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13860; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  46%|████▌     | 13800/30000 [52:43<2:52:52,  1.56it/s, Loss=nan]Training progress:  46%|████▋     | 13900/30000 [52:43<2:51:26,  1.57it/s, Loss=nan]2026-10-15 14:23:31,147 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 13985; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:23:41,472 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 14:23:41,473 - INFO: 
+-----[ITER 14000] bits info (accurate): ttl_size_feat_MB=4.671060632914305, ttl_size_scaling_MB=2.622209460940212, ttl_size_offsets_MB=2.42605487909168, ttl_size_MB=9.719324972946197-----
+2026-10-15 14:23:41,474 - INFO: 
+-----[ITER 14000] bits info (approx from visible): bit_per_feat_param=1.8564120531082153, ttl_size_feat_MB_approx=5.565358070752779-----
+2026-10-15 14:23:41,474 - INFO: 
+-----[ITER 14000] bits info: anchor_num=502966-----
+2026-10-15 14:23:41,474 - INFO: 
+-----[ITER 14000] bits info: 1_rate_mask=0.8375675082206726, mask_numel=502966, mask_size_MB=0.03838289901614189-----
+2026-10-15 14:23:41,479 - INFO: 
+-----[ITER 14000] RENO anchor rate term: avg_bpp_per_anchor=20.6178 (raw=19.6693), anchor_count_soft=421268.0-----
+Training progress:  46%|████▋     | 13900/30000 [53:48<2:51:26,  1.57it/s, Loss=nan]Training progress:  47%|████▋     | 14000/30000 [53:48<2:51:33,  1.55it/s, Loss=nan]2026-10-15 14:23:42,101 - INFO: [RENO] iter=14000 bpp=19.6294 anchor_num=20000
+Training progress:  47%|████▋     | 14000/30000 [54:49<2:51:33,  1.55it/s, Loss=nan]Training progress:  47%|████▋     | 14100/30000 [54:49<2:47:54,  1.58it/s, Loss=nan]2026-10-15 14:24:45,939 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14104; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:25:12,514 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14148; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  47%|████▋     | 14100/30000 [55:49<2:47:54,  1.58it/s, Loss=nan]Training progress:  47%|████▋     | 14200/30000 [55:49<2:43:41,  1.61it/s, Loss=nan]2026-10-15 14:25:42,562 - INFO: [RENO] iter=14200 bpp=19.5748 anchor_num=20000
+2026-10-15 14:26:08,921 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14244; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  47%|████▋     | 14200/30000 [56:48<2:43:41,  1.61it/s, Loss=nan]Training progress:  48%|████▊     | 14300/30000 [56:48<2:40:11,  1.63it/s, Loss=nan]2026-10-15 14:26:51,763 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14318; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  48%|████▊     | 14300/30000 [57:46<2:40:11,  1.63it/s, Loss=nan]Training progress:  48%|████▊     | 14400/30000 [57:46<2:36:32,  1.66it/s, Loss=nan]2026-10-15 14:27:39,417 - INFO: [RENO] iter=14400 bpp=19.5438 anchor_num=20000
+2026-10-15 14:28:35,031 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14495; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  48%|████▊     | 14400/30000 [58:44<2:36:32,  1.66it/s, Loss=nan]Training progress:  48%|████▊     | 14500/30000 [58:44<2:34:16,  1.67it/s, Loss=nan]2026-10-15 14:29:15,739 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14565; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  48%|████▊     | 14500/30000 [59:43<2:34:16,  1.67it/s, Loss=nan]Training progress:  49%|████▊     | 14600/30000 [59:43<2:32:21,  1.68it/s, Loss=nan]2026-10-15 14:29:36,541 - INFO: [RENO] iter=14600 bpp=19.4614 anchor_num=20000
+2026-10-15 14:29:51,436 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14626; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  49%|████▊     | 14600/30000 [1:00:41<2:32:21,  1.68it/s, Loss=nan]Training progress:  49%|████▉     | 14700/30000 [1:00:41<2:30:46,  1.69it/s, Loss=nan]2026-10-15 14:31:22,468 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14782; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  49%|████▉     | 14700/30000 [1:01:40<2:30:46,  1.69it/s, Loss=nan]Training progress:  49%|████▉     | 14800/30000 [1:01:40<2:29:13,  1.70it/s, Loss=nan]2026-10-15 14:31:33,510 - INFO: [RENO] iter=14800 bpp=19.5660 anchor_num=20000
+2026-10-15 14:31:41,907 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14815; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  49%|████▉     | 14800/30000 [1:02:38<2:29:13,  1.70it/s, Loss=nan]Training progress:  50%|████▉     | 14900/30000 [1:02:38<2:27:47,  1.70it/s, Loss=nan]2026-10-15 14:32:49,118 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 14929; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:33:31,048 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 14:33:31,048 - INFO: 
+-----[ITER 15000] bits info (accurate): ttl_size_feat_MB=4.6526354644447565, ttl_size_scaling_MB=1.7213626550510526, ttl_size_offsets_MB=2.294704059138894, ttl_size_MB=8.668702178634703-----
+2026-10-15 14:33:31,048 - INFO: 
+-----[ITER 15000] bits info (approx from visible): bit_per_feat_param=1.8796193599700928, ttl_size_feat_MB_approx=5.787028929219673-----
+2026-10-15 14:33:31,049 - INFO: 
+-----[ITER 15000] bits info: anchor_num=516542-----
+2026-10-15 14:33:31,049 - INFO: 
+-----[ITER 15000] bits info: 1_rate_mask=0.8041689395904541, mask_numel=516542, mask_size_MB=0.04393943399190903-----
+2026-10-15 14:33:31,054 - INFO: 
+-----[ITER 15000] RENO anchor rate term: avg_bpp_per_anchor=19.9468 (raw=19.5152), anchor_count_soft=415387.0-----
+Training progress:  50%|████▉     | 14900/30000 [1:03:38<2:27:47,  1.70it/s, Loss=nan]Training progress:  50%|█████     | 15000/30000 [1:03:38<2:27:46,  1.69it/s, Loss=nan]2026-10-15 14:33:31,495 - INFO: [RENO] iter=15000 bpp=19.5265 anchor_num=20000
+2026-10-15 14:33:33,648 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15004; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  50%|█████     | 15000/30000 [1:04:36<2:27:46,  1.69it/s, Loss=nan]Training progress:  50%|█████     | 15100/30000 [1:04:36<2:25:45,  1.70it/s, Loss=nan]2026-10-15 14:34:45,415 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15128; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  50%|█████     | 15100/30000 [1:05:34<2:25:45,  1.70it/s, Loss=nan]Training progress:  51%|█████     | 15200/30000 [1:05:34<2:24:26,  1.71it/s, Loss=nan]2026-10-15 14:35:27,419 - INFO: [RENO] iter=15200 bpp=19.5116 anchor_num=20000
+2026-10-15 14:35:41,085 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15223; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  51%|█████     | 15200/30000 [1:06:31<2:24:26,  1.71it/s, Loss=nan]Training progress:  51%|█████     | 15300/30000 [1:06:31<2:22:40,  1.72it/s, Loss=nan]2026-10-15 14:36:34,464 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15317; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  51%|█████     | 15300/30000 [1:07:28<2:22:40,  1.72it/s, Loss=nan]Training progress:  51%|█████▏    | 15400/30000 [1:07:28<2:20:42,  1.73it/s, Loss=nan]2026-10-15 14:37:21,778 - INFO: [RENO] iter=15400 bpp=19.5138 anchor_num=20000
+2026-10-15 14:38:06,270 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15477; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  51%|█████▏    | 15400/30000 [1:08:27<2:20:42,  1.73it/s, Loss=nan]Training progress:  52%|█████▏    | 15500/30000 [1:08:27<2:20:32,  1.72it/s, Loss=nan]2026-10-15 14:39:01,800 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15572; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  52%|█████▏    | 15500/30000 [1:09:24<2:20:32,  1.72it/s, Loss=nan]Training progress:  52%|█████▏    | 15600/30000 [1:09:24<2:18:43,  1.73it/s, Loss=nan]2026-10-15 14:39:17,672 - INFO: [RENO] iter=15600 bpp=19.4606 anchor_num=20000
+2026-10-15 14:39:46,824 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15651; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  52%|█████▏    | 15600/30000 [1:10:21<2:18:43,  1.73it/s, Loss=nan]Training progress:  52%|█████▏    | 15700/30000 [1:10:21<2:17:11,  1.74it/s, Loss=nan]2026-10-15 14:40:26,879 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15722; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  52%|█████▏    | 15700/30000 [1:11:19<2:17:11,  1.74it/s, Loss=nan]Training progress:  53%|█████▎    | 15800/30000 [1:11:19<2:16:04,  1.74it/s, Loss=nan]2026-10-15 14:41:12,012 - INFO: [RENO] iter=15800 bpp=19.4808 anchor_num=20000
+2026-10-15 14:41:25,358 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15824; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  53%|█████▎    | 15800/30000 [1:12:15<2:16:04,  1.74it/s, Loss=nan]Training progress:  53%|█████▎    | 15900/30000 [1:12:15<2:14:35,  1.75it/s, Loss=nan]2026-10-15 14:42:19,040 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 15918; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+==== MASK-RELATED PARAMS ==== [15/10 13:29:53]
+_mask: shape=torch.Size([84303, 11, 1]), requires_grad=True [15/10 13:29:53]
+==== MASK GRAD DEBUG ==== [15/10 13:30:41]
+_mask: mean=0.7510, grad_none=False, grad_norm=2.0616e-04 [15/10 13:30:41]
+_mask sigmoid mean=0.6113, grad_none=False, grad_norm=2.0616e-04 [15/10 13:30:41]
+==== MASK GRAD DEBUG ==== [15/10 13:34:34]
+_mask: mean=0.1072, grad_none=False, grad_norm=2.5370e-05 [15/10 13:34:34]
+_mask sigmoid mean=0.5137, grad_none=False, grad_norm=2.5370e-05 [15/10 13:34:34]
+anchor_bound_updated [15/10 13:40:39]
+==== MASK GRAD DEBUG ==== [15/10 13:40:39]
+_mask: mean=0.0632, grad_none=False, grad_norm=1.5020e-05 [15/10 13:40:39]
+_mask sigmoid mean=0.5057, grad_none=False, grad_norm=1.5020e-05 [15/10 13:40:39]
+[renderer] WARNING: mean_adj has 17 NaN, 3 Inf  (step=10024) [15/10 13:40:54]
+[renderer] WARNING: scale_adj has 17 NaN, 3 Inf  (step=10024) [15/10 13:40:54]
+[EG_mix_prob_2] WARNING: mean2 has 17 NaN, 3 Inf values [15/10 13:40:54]
+[EG_mix_prob_2] WARNING: scale2 has 17 NaN, 3 Inf values [15/10 13:40:54]
+[EG_mix_prob_2] WARNING: probs1 has 19 NaN, 0 Inf values [15/10 13:40:54]
+[EG_mix_prob_2] WARNING: probs2 has 19 NaN, 0 Inf values [15/10 13:40:54]
+[renderer] WARNING: mean_adj has 30 NaN, 0 Inf  (step=10031) [15/10 13:40:58]
+[renderer] WARNING: scale_adj has 30 NaN, 0 Inf  (step=10031) [15/10 13:40:58]
+[EG_mix_prob_2] WARNING: mean2 has 30 NaN, 0 Inf values [15/10 13:40:58]
+[EG_mix_prob_2] WARNING: scale2 has 30 NaN, 0 Inf values [15/10 13:40:58]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [15/10 13:40:58]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [15/10 13:40:58]
+[DEBUG Q_feat_prepass] step=11000 Q_feat_adj: -0.0920/0.1352 Q_feat: 0.9087 [15/10 13:51:28]
+[DEBUG LevelSEGate gate_xyz] step=11000 per-level mean=['0.877', '0.873', '0.878', '0.875', '0.874', '0.873', '0.881', '0.881', '0.878', '0.887', '0.879', '0.882'] std=['0.000', '0.000', '0.000', '0.000', '0.001', '0.001', '0.000', '0.000', '0.000', '0.001', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 13:51:28]
+[DEBUG LevelSEGate gate_xy] step=11000 per-level mean=['0.880', '0.881', '0.885', '0.887'] std=['0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 13:51:28]
+[DEBUG LevelSEGate gate_xz] step=11000 per-level mean=['0.877', '0.881', '0.881', '0.882'] std=['0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 13:51:28]
+[DEBUG LevelSEGate gate_yz] step=11000 per-level mean=['0.879', '0.880', '0.881', '0.883'] std=['0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 13:51:28]
+[DEBUG Q_feat_adj] step=11000 no_cond: 0.3197/0.4267 cond: 0.2626/0.4600 Q_feat_if_cond: 1.2039 [15/10 13:51:28]
+[DEBUG Q_feat_prepass] step=12000 Q_feat_adj: -0.1496/0.2874 Q_feat: 0.8588 [15/10 14:02:19]
+[DEBUG LevelSEGate gate_xyz] step=12000 per-level mean=['0.877', '0.874', '0.874', '0.874', '0.870', '0.873', '0.879', '0.880', '0.877', '0.887', '0.879', '0.879'] std=['0.000', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.001', '0.000', '0.001', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:02:19]
+[DEBUG LevelSEGate gate_xy] step=12000 per-level mean=['0.878', '0.879', '0.883', '0.886'] std=['0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:02:19]
+[DEBUG LevelSEGate gate_xz] step=12000 per-level mean=['0.875', '0.881', '0.882', '0.884'] std=['0.002', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [15/10 14:02:19]
+[DEBUG LevelSEGate gate_yz] step=12000 per-level mean=['0.876', '0.879', '0.880', '0.884'] std=['0.001', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:02:19]
+[DEBUG Q_feat_adj] step=12000 no_cond: 0.1502/0.4797 cond: 0.2140/0.5001 Q_feat_if_cond: 1.1542 [15/10 14:02:19]
+[DEBUG Q_feat_prepass] step=13000 Q_feat_adj: -0.2630/0.2068 Q_feat: 0.7517 [15/10 14:13:02]
+[DEBUG LevelSEGate gate_xyz] step=13000 per-level mean=['0.876', '0.871', '0.872', '0.872', '0.868', '0.872', '0.877', '0.878', '0.875', '0.887', '0.878', '0.878'] std=['0.000', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.001', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:13:02]
+[DEBUG LevelSEGate gate_xy] step=13000 per-level mean=['0.878', '0.878', '0.883', '0.886'] std=['0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:13:02]
+[DEBUG LevelSEGate gate_xz] step=13000 per-level mean=['0.874', '0.881', '0.882', '0.883'] std=['0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:13:02]
+[DEBUG LevelSEGate gate_yz] step=13000 per-level mean=['0.874', '0.879', '0.880', '0.884'] std=['0.001', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:13:02]
+[DEBUG Q_feat_adj] step=13000 no_cond: 0.1494/0.5096 cond: 0.2648/0.6595 Q_feat_if_cond: 1.1641 [15/10 14:13:02]
+[DEBUG Q_feat_prepass] step=14000 Q_feat_adj: -0.2830/0.2063 Q_feat: 0.7339 [15/10 14:23:40]
+[DEBUG LevelSEGate gate_xyz] step=14000 per-level mean=['0.874', '0.870', '0.870', '0.872', '0.865', '0.871', '0.876', '0.877', '0.875', '0.887', '0.878', '0.878'] std=['0.001', '0.001', '0.001', '0.001', '0.002', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:23:40]
+[DEBUG LevelSEGate gate_xy] step=14000 per-level mean=['0.877', '0.878', '0.883', '0.887'] std=['0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:23:40]
+[DEBUG LevelSEGate gate_xz] step=14000 per-level mean=['0.874', '0.881', '0.882', '0.883'] std=['0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:23:40]
+[DEBUG LevelSEGate gate_yz] step=14000 per-level mean=['0.872', '0.878', '0.880', '0.885'] std=['0.001', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:23:40]
+[DEBUG Q_feat_adj] step=14000 no_cond: 0.1531/0.5496 cond: 0.2096/0.7405 Q_feat_if_cond: 1.1089 [15/10 14:23:40]
+[DEBUG Q_feat_prepass] step=15000 Q_feat_adj: -0.0277/0.3817 Q_feat: 0.9602 [15/10 14:33:29]
+[DEBUG LevelSEGate gate_xyz] step=15000 per-level mean=['0.871', '0.865', '0.864', '0.868', '0.857', '0.864', '0.872', '0.873', '0.870', '0.889', '0.875', '0.877'] std=['0.001', '0.001', '0.002', '0.001', '0.002', '0.002', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:33:29]
+[DEBUG LevelSEGate gate_xy] step=15000 per-level mean=['0.876', '0.877', '0.882', '0.886'] std=['0.000', '0.000', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:33:29]
+[DEBUG LevelSEGate gate_xz] step=15000 per-level mean=['0.868', '0.882', '0.886', '0.887'] std=['0.003', '0.001', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 14:33:29]
+[DEBUG LevelSEGate gate_yz] step=15000 per-level mean=['0.869', '0.877', '0.880', '0.885'] std=['0.002', '0.001', '0.000', '0.000'] (init was a uniform 0.881 for every level) [15/10 14:33:29]
+[DEBUG Q_feat_adj] step=15000 no_cond: 0.0886/0.5467 cond: 0.0300/0.8248 Q_feat_if_cond: 0.9669 [15/10 14:33:29]
+[DEBUG Q_feat_prepass] step=16000 Q_feat_adj: -0.2803/0.2307 Q_feat: 0.7385 [15/10 14:43:04]
+[DEBUG LevelSEGate gate_xyz] step=16000 per-level mean=['0.869', '0.861', '0.860', '0.865', '0.852', '0.860', '0.869', '0.871', '0.868', '0.887', '0.872', '0.876'] std=['0.001', '0.002', '0.002', '0.001', '0.003', '0.002', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:43:04]
+[DEBUG LevelSEGate gate_xy] step=16000 per-level mean=['0.876', '0.876', '0.882', '0.887'] std=['0.001', '0.000', '0.000', '0.002'] (init was a uniform 0.881 for every level) [15/10 14:43:04]
+[DEBUG LevelSEGate gate_xz] step=16000 per-level mean=['0.872', '0.881', '0.883', '0.884'] std=['0.002', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:43:04]
+2026-10-15 14:43:06,135 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 14:43:06,136 - INFO: 
+-----[ITER 16000] bits info (accurate): ttl_size_feat_MB=4.347949733026326, ttl_size_scaling_MB=1.6221631653606892, ttl_size_offsets_MB=2.0546710276976228, ttl_size_MB=8.024783926084638-----
+2026-10-15 14:43:06,136 - INFO: 
+-----[ITER 16000] bits info (approx from visible): bit_per_feat_param=1.8218132257461548, ttl_size_feat_MB_approx=5.609053654988827-----
+2026-10-15 14:43:06,136 - INFO: 
+-----[ITER 16000] bits info: anchor_num=516542-----
+2026-10-15 14:43:06,137 - INFO: 
+-----[ITER 16000] bits info: 1_rate_mask=0.7753871083259583, mask_numel=516542, mask_size_MB=0.04732552915811539-----
+2026-10-15 14:43:06,142 - INFO: 
+-----[ITER 16000] RENO anchor rate term: avg_bpp_per_anchor=19.6863 (raw=19.5155), anchor_count_soft=400520.0-----
+Training progress:  53%|█████▎    | 15900/30000 [1:13:13<2:14:35,  1.75it/s, Loss=nan]Training progress:  53%|█████▎    | 16000/30000 [1:13:13<2:13:52,  1.74it/s, Loss=nan]2026-10-15 14:43:06,382 - INFO: [RENO] iter=16000 bpp=19.4876 anchor_num=20000
+2026-10-15 14:43:45,111 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16068; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  53%|█████▎    | 16000/30000 [1:14:09<2:13:52,  1.74it/s, Loss=nan]Training progress:  54%|█████▎    | 16100/30000 [1:14:09<2:12:08,  1.75it/s, Loss=nan]2026-10-15 14:44:28,414 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16145; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:44:51,391 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16184; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  54%|█████▎    | 16100/30000 [1:15:07<2:12:08,  1.75it/s, Loss=nan]Training progress:  54%|█████▍    | 16200/30000 [1:15:07<2:11:38,  1.75it/s, Loss=nan]2026-10-15 14:45:00,324 - INFO: [RENO] iter=16200 bpp=19.4751 anchor_num=20000
+Training progress:  54%|█████▍    | 16200/30000 [1:16:04<2:11:38,  1.75it/s, Loss=nan]Training progress:  54%|█████▍    | 16300/30000 [1:16:04<2:10:25,  1.75it/s, Loss=nan]2026-10-15 14:46:23,438 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16348; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  54%|█████▍    | 16300/30000 [1:16:59<2:10:25,  1.75it/s, Loss=nan]Training progress:  55%|█████▍    | 16400/30000 [1:16:59<2:08:21,  1.77it/s, Loss=nan]2026-10-15 14:46:52,670 - INFO: [RENO] iter=16400 bpp=19.5751 anchor_num=20000
+2026-10-15 14:46:53,421 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16401; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  55%|█████▍    | 16400/30000 [1:17:57<2:08:21,  1.77it/s, Loss=nan]Training progress:  55%|█████▌    | 16500/30000 [1:17:57<2:07:57,  1.76it/s, Loss=nan]2026-10-15 14:47:50,872 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16501; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  55%|█████▌    | 16500/30000 [1:18:53<2:07:57,  1.76it/s, Loss=nan]Training progress:  55%|█████▌    | 16600/30000 [1:18:53<2:06:21,  1.77it/s, Loss=nan]2026-10-15 14:48:45,998 - INFO: [RENO] iter=16600 bpp=19.5289 anchor_num=20000
+2026-10-15 14:49:15,022 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16653; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  55%|█████▌    | 16600/30000 [1:19:47<2:06:21,  1.77it/s, Loss=nan]Training progress:  56%|█████▌    | 16700/30000 [1:19:47<2:04:16,  1.78it/s, Loss=nan]2026-10-15 14:50:06,594 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16746; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  56%|█████▌    | 16700/30000 [1:20:43<2:04:16,  1.78it/s, Loss=nan]Training progress:  56%|█████▌    | 16800/30000 [1:20:43<2:03:15,  1.78it/s, Loss=nan]2026-10-15 14:50:36,791 - INFO: [RENO] iter=16800 bpp=19.6512 anchor_num=20000
+2026-10-15 14:50:43,056 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16811; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:51:20,994 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16880; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  56%|█████▌    | 16800/30000 [1:21:39<2:03:15,  1.78it/s, Loss=nan]Training progress:  56%|█████▋    | 16900/30000 [1:21:39<2:02:12,  1.79it/s, Loss=nan]2026-10-15 14:52:25,332 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 16995; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:52:28,889 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 14:52:28,890 - INFO: 
+-----[ITER 17000] bits info (accurate): ttl_size_feat_MB=4.18217171143624, ttl_size_scaling_MB=1.5563782708195504, ttl_size_offsets_MB=1.8676565400819527, ttl_size_MB=7.606206522337743-----
+2026-10-15 14:52:28,890 - INFO: 
+-----[ITER 17000] bits info (approx from visible): bit_per_feat_param=1.8121527433395386, ttl_size_feat_MB_approx=5.579310669601512-----
+2026-10-15 14:52:28,890 - INFO: 
+-----[ITER 17000] bits info: anchor_num=516542-----
+2026-10-15 14:52:28,891 - INFO: 
+-----[ITER 17000] bits info: 1_rate_mask=0.7493389248847961, mask_numel=516542, mask_size_MB=0.050023987889289856-----
+2026-10-15 14:52:28,896 - INFO: 
+-----[ITER 17000] RENO anchor rate term: avg_bpp_per_anchor=19.6078 (raw=19.6580), anchor_count_soft=387065.0-----
+Training progress:  56%|█████▋    | 16900/30000 [1:22:36<2:02:12,  1.79it/s, Loss=nan]Training progress:  57%|█████▋    | 17000/30000 [1:22:36<2:01:42,  1.78it/s, Loss=nan]2026-10-15 14:52:29,288 - INFO: [RENO] iter=17000 bpp=19.5035 anchor_num=20000
+Training progress:  57%|█████▋    | 17000/30000 [1:23:31<2:01:42,  1.78it/s, Loss=nan]Training progress:  57%|█████▋    | 17100/30000 [1:23:31<2:00:19,  1.79it/s, Loss=nan]2026-10-15 14:53:33,951 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17117; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  57%|█████▋    | 17100/30000 [1:24:28<2:00:19,  1.79it/s, Loss=nan]Training progress:  57%|█████▋    | 17200/30000 [1:24:28<1:59:49,  1.78it/s, Loss=nan]2026-10-15 14:54:21,412 - INFO: [RENO] iter=17200 bpp=19.4295 anchor_num=20000
+2026-10-15 14:54:45,383 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17244; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 14:55:07,197 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17283; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  57%|█████▋    | 17200/30000 [1:25:23<1:59:49,  1.78it/s, Loss=nan]Training progress:  58%|█████▊    | 17300/30000 [1:25:23<1:58:02,  1.79it/s, Loss=nan]2026-10-15 14:55:55,655 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17370; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  58%|█████▊    | 17300/30000 [1:26:19<1:58:02,  1.79it/s, Loss=nan]Training progress:  58%|█████▊    | 17400/30000 [1:26:19<1:57:27,  1.79it/s, Loss=nan]2026-10-15 14:56:12,553 - INFO: [RENO] iter=17400 bpp=19.5561 anchor_num=20000
+2026-10-15 14:56:39,877 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17451; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  58%|█████▊    | 17400/30000 [1:27:13<1:57:27,  1.79it/s, Loss=nan]Training progress:  58%|█████▊    | 17500/30000 [1:27:13<1:55:30,  1.80it/s, Loss=nan]2026-10-15 14:57:37,533 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17555; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  58%|█████▊    | 17500/30000 [1:28:09<1:55:30,  1.80it/s, Loss=nan]Training progress:  59%|█████▊    | 17600/30000 [1:28:09<1:54:25,  1.81it/s, Loss=nan]2026-10-15 14:58:02,030 - INFO: [RENO] iter=17600 bpp=19.5400 anchor_num=20000
+2026-10-15 14:58:50,116 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17690; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  59%|█████▊    | 17600/30000 [1:29:02<1:54:25,  1.81it/s, Loss=nan]Training progress:  59%|█████▉    | 17700/30000 [1:29:02<1:52:27,  1.82it/s, Loss=nan]2026-10-15 14:59:38,143 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17776; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  59%|█████▉    | 17700/30000 [1:29:58<1:52:27,  1.82it/s, Loss=nan]Training progress:  59%|█████▉    | 17800/30000 [1:29:58<1:52:01,  1.82it/s, Loss=nan]2026-10-15 14:59:51,352 - INFO: [RENO] iter=17800 bpp=19.4892 anchor_num=20000
+Training progress:  59%|█████▉    | 17800/30000 [1:30:52<1:52:01,  1.82it/s, Loss=nan]Training progress:  60%|█████▉    | 17900/30000 [1:30:52<1:50:29,  1.83it/s, Loss=nan]2026-10-15 15:01:04,176 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17934; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:01:09,529 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 17943; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:01:41,866 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 15:01:41,867 - INFO: 
+-----[ITER 18000] bits info (accurate): ttl_size_feat_MB=3.9776627669343725, ttl_size_scaling_MB=1.4894834547012579, ttl_size_offsets_MB=1.7165000174718443, ttl_size_MB=7.183646239107475-----
+2026-10-15 15:01:41,867 - INFO: 
+-----[ITER 18000] bits info (approx from visible): bit_per_feat_param=1.7834378480911255, ttl_size_feat_MB_approx=5.4909023817103275-----
+2026-10-15 15:01:41,867 - INFO: 
+-----[ITER 18000] bits info: anchor_num=516542-----
+2026-10-15 15:01:41,868 - INFO: 
+-----[ITER 18000] bits info: 1_rate_mask=0.7261539697647095, mask_numel=516542, mask_size_MB=0.05215486139059067-----
+2026-10-15 15:01:41,873 - INFO: 
+-----[ITER 18000] RENO anchor rate term: avg_bpp_per_anchor=19.5857 (raw=19.6462), anchor_count_soft=375089.0-----
+Training progress:  60%|█████▉    | 17900/30000 [1:31:49<1:50:29,  1.83it/s, Loss=nan]Training progress:  60%|██████    | 18000/30000 [1:31:49<1:50:42,  1.81it/s, Loss=nan]2026-10-15 15:01:42,103 - INFO: [RENO] iter=18000 bpp=19.6454 anchor_num=20000
+2026-10-15 15:02:01,253 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18036; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  60%|██████    | 18000/30000 [1:32:42<1:50:42,  1.81it/s, Loss=nan]Training progress:  60%|██████    | 18100/30000 [1:32:42<1:48:41,  1.82it/s, Loss=nan]2026-10-15 15:03:23,762 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18188; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  60%|██████    | 18100/30000 [1:33:37<1:48:41,  1.82it/s, Loss=nan]Training progress:  61%|██████    | 18200/30000 [1:33:37<1:47:49,  1.82it/s, Loss=nan]2026-10-15 15:03:30,516 - INFO: [RENO] iter=18200 bpp=19.6233 anchor_num=20000
+Training progress:  61%|██████    | 18200/30000 [1:34:32<1:47:49,  1.82it/s, Loss=nan]Training progress:  61%|██████    | 18300/30000 [1:34:32<1:46:53,  1.82it/s, Loss=nan]2026-10-15 15:04:30,763 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18312; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:05:05,052 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18375; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  61%|██████    | 18300/30000 [1:35:25<1:46:53,  1.82it/s, Loss=nan]Training progress:  61%|██████▏   | 18400/30000 [1:35:25<1:45:14,  1.84it/s, Loss=nan]2026-10-15 15:05:18,859 - INFO: [RENO] iter=18400 bpp=19.5687 anchor_num=20000
+2026-10-15 15:06:10,216 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18495; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  61%|██████▏   | 18400/30000 [1:36:20<1:45:14,  1.84it/s, Loss=nan]Training progress:  62%|██████▏   | 18500/30000 [1:36:20<1:44:11,  1.84it/s, Loss=nan]2026-10-15 15:06:25,488 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18524; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  62%|██████▏   | 18500/30000 [1:37:13<1:44:11,  1.84it/s, Loss=nan]Training progress:  62%|██████▏   | 18600/30000 [1:37:13<1:42:52,  1.85it/s, Loss=nan]2026-10-15 15:07:06,697 - INFO: [RENO] iter=18600 bpp=19.5621 anchor_num=20000
+2026-10-15 15:07:23,294 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18632; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  62%|██████▏   | 18600/30000 [1:38:07<1:42:52,  1.85it/s, Loss=nan]Training progress:  62%|██████▏   | 18700/30000 [1:38:07<1:41:38,  1.85it/s, Loss=nan]2026-10-15 15:08:12,339 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18721; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  62%|██████▏   | 18700/30000 [1:39:02<1:41:38,  1.85it/s, Loss=nan]Training progress:  63%|██████▎   | 18800/30000 [1:39:02<1:41:18,  1.84it/s, Loss=nan]2026-10-15 15:08:55,247 - INFO: [RENO] iter=18800 bpp=19.5110 anchor_num=20000
+2026-10-15 15:09:22,511 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18851; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  63%|██████▎   | 18800/30000 [1:39:56<1:41:18,  1.84it/s, Loss=nan]Training progress:  63%|██████▎   | 18900/30000 [1:39:56<1:40:13,  1.85it/s, Loss=nan]2026-10-15 15:10:19,758 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 18959; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:10:42,593 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 15:10:42,594 - INFO: 
+-----[ITER 19000] bits info (accurate): ttl_size_feat_MB=3.83547380939126, ttl_size_scaling_MB=1.4501858069561422, ttl_size_offsets_MB=1.6164510846138, ttl_size_MB=6.902110700961202-----
+2026-10-15 15:10:42,594 - INFO: 
+-----[ITER 19000] bits info (approx from visible): bit_per_feat_param=1.7679671049118042, ttl_size_feat_MB_approx=5.443270589741189-----
+2026-10-15 15:10:42,594 - INFO: 
+-----[ITER 19000] bits info: anchor_num=516542-----
+2026-10-15 15:10:42,594 - INFO: 
+-----[ITER 19000] bits info: 1_rate_mask=0.7065350413322449, mask_numel=516542, mask_size_MB=0.05376975238323212-----
+2026-10-15 15:10:42,599 - INFO: 
+-----[ITER 19000] RENO anchor rate term: avg_bpp_per_anchor=19.5874 (raw=19.5340), anchor_count_soft=364955.0-----
+Training progress:  63%|██████▎   | 18900/30000 [1:40:50<1:40:13,  1.85it/s, Loss=nan]Training progress:  63%|██████▎   | 19000/30000 [1:40:50<1:39:07,  1.85it/s, Loss=nan]2026-10-15 15:10:42,990 - INFO: [RENO] iter=19000 bpp=19.5460 anchor_num=20000
+2026-10-15 15:10:54,965 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19022; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  63%|██████▎   | 19000/30000 [1:41:43<1:39:07,  1.85it/s, Loss=nan]Training progress:  64%|██████▎   | 19100/30000 [1:41:43<1:37:58,  1.85it/s, Loss=nan]2026-10-15 15:12:09,550 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19161; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  64%|██████▎   | 19100/30000 [1:42:36<1:37:58,  1.85it/s, Loss=nan]Training progress:  64%|██████▍   | 19200/30000 [1:42:36<1:36:39,  1.86it/s, Loss=nan]2026-10-15 15:12:29,765 - INFO: [RENO] iter=19200 bpp=19.6574 anchor_num=20000
+2026-10-15 15:12:58,711 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19254; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  64%|██████▍   | 19200/30000 [1:43:29<1:36:39,  1.86it/s, Loss=nan]Training progress:  64%|██████▍   | 19300/30000 [1:43:29<1:35:13,  1.87it/s, Loss=nan]2026-10-15 15:13:28,667 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19313; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  64%|██████▍   | 19300/30000 [1:44:22<1:35:13,  1.87it/s, Loss=nan]Training progress:  65%|██████▍   | 19400/30000 [1:44:22<1:33:51,  1.88it/s, Loss=nan]2026-10-15 15:14:14,969 - INFO: [RENO] iter=19400 bpp=19.6850 anchor_num=20000
+2026-10-15 15:14:59,964 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19486; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  65%|██████▍   | 19400/30000 [1:45:14<1:33:51,  1.88it/s, Loss=nan]Training progress:  65%|██████▌   | 19500/30000 [1:45:14<1:32:29,  1.89it/s, Loss=nan]2026-10-15 15:15:34,223 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19552; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  65%|██████▌   | 19500/30000 [1:46:06<1:32:29,  1.89it/s, Loss=nan]Training progress:  65%|██████▌   | 19600/30000 [1:46:06<1:31:26,  1.90it/s, Loss=nan]2026-10-15 15:15:59,709 - INFO: [RENO] iter=19600 bpp=19.4927 anchor_num=20000
+2026-10-15 15:16:47,339 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19691; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  65%|██████▌   | 19600/30000 [1:46:59<1:31:26,  1.90it/s, Loss=nan]Training progress:  66%|██████▌   | 19700/30000 [1:46:59<1:30:21,  1.90it/s, Loss=nan]2026-10-15 15:17:08,068 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19731; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  66%|██████▌   | 19700/30000 [1:47:50<1:30:21,  1.90it/s, Loss=nan]Training progress:  66%|██████▌   | 19800/30000 [1:47:50<1:29:04,  1.91it/s, Loss=nan]2026-10-15 15:17:43,883 - INFO: [RENO] iter=19800 bpp=19.6668 anchor_num=20000
+2026-10-15 15:18:14,771 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19858; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  66%|██████▌   | 19800/30000 [1:48:43<1:29:04,  1.91it/s, Loss=nan]Training progress:  66%|██████▋   | 19900/30000 [1:48:43<1:28:12,  1.91it/s, Loss=nan]2026-10-15 15:19:18,090 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 19981; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:19:28,552 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 15:19:28,553 - INFO: 
+-----[ITER 20000] bits info (accurate): ttl_size_feat_MB=3.7227046070620418, ttl_size_scaling_MB=1.412104454357177, ttl_size_offsets_MB=1.5351108629256487, ttl_size_MB=6.6699199243448675-----
+2026-10-15 15:19:28,553 - INFO: 
+-----[ITER 20000] bits info (approx from visible): bit_per_feat_param=1.7537001371383667, ttl_size_feat_MB_approx=5.399345017896451-----
+2026-10-15 15:19:28,554 - INFO: 
+-----[ITER 20000] bits info: anchor_num=516542-----
+2026-10-15 15:19:28,554 - INFO: 
+-----[ITER 20000] bits info: 1_rate_mask=0.6898509860038757, mask_numel=516542, mask_size_MB=0.05501299351453781-----
+2026-10-15 15:19:28,559 - INFO: 
+-----[ITER 20000] RENO anchor rate term: avg_bpp_per_anchor=19.6007 (raw=19.6492), anchor_count_soft=356337.0-----
+Training progress:  66%|██████▋   | 19900/30000 [1:49:35<1:28:12,  1.91it/s, Loss=nan]Training progress:  67%|██████▋   | 20000/30000 [1:49:35<1:27:22,  1.91it/s, Loss=nan]2026-10-15 15:19:28,787 - INFO: [RENO] iter=20000 bpp=19.6397 anchor_num=20000
+2026-10-15 15:19:50,863 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20043; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  67%|██████▋   | 20000/30000 [1:50:28<1:27:22,  1.91it/s, Loss=nan]Training progress:  67%|██████▋   | 20100/30000 [1:50:28<1:26:24,  1.91it/s, Loss=nan]2026-10-15 15:20:48,642 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20151; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  67%|██████▋   | 20100/30000 [1:51:20<1:26:24,  1.91it/s, Loss=nan]Training progress:  67%|██████▋   | 20200/30000 [1:51:20<1:25:22,  1.91it/s, Loss=nan]2026-10-15 15:21:13,047 - INFO: [RENO] iter=20200 bpp=19.7516 anchor_num=20000
+2026-10-15 15:21:48,659 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20269; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  67%|██████▋   | 20200/30000 [1:52:12<1:25:22,  1.91it/s, Loss=nan]Training progress:  68%|██████▊   | 20300/30000 [1:52:12<1:24:27,  1.91it/s, Loss=nan]2026-10-15 15:22:43,952 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20375; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  68%|██████▊   | 20300/30000 [1:53:03<1:24:27,  1.91it/s, Loss=nan]Training progress:  68%|██████▊   | 20400/30000 [1:53:03<1:23:09,  1.92it/s, Loss=nan]2026-10-15 15:22:56,590 - INFO: [RENO] iter=20400 bpp=19.6012 anchor_num=20000
+2026-10-15 15:23:00,257 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20407; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  68%|██████▊   | 20400/30000 [1:53:55<1:23:09,  1.92it/s, Loss=nan]Training progress:  68%|██████▊   | 20500/30000 [1:53:55<1:22:06,  1.93it/s, Loss=nan]2026-10-15 15:23:51,546 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20506; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  68%|██████▊   | 20500/30000 [1:54:47<1:22:06,  1.93it/s, Loss=nan]Training progress:  69%|██████▊   | 20600/30000 [1:54:47<1:21:25,  1.92it/s, Loss=nan]2026-10-15 15:24:40,426 - INFO: [RENO] iter=20600 bpp=19.7014 anchor_num=20000
+2026-10-15 15:24:57,522 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20633; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:25:22,590 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20682; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  69%|██████▊   | 20600/30000 [1:55:39<1:21:25,  1.92it/s, Loss=nan]Training progress:  69%|██████▉   | 20700/30000 [1:55:39<1:20:32,  1.92it/s, Loss=nan]Training progress:  69%|██████▉   | 20700/30000 [1:56:31<1:20:32,  1.92it/s, Loss=nan]Training progress:  69%|██████▉   | 20800/30000 [1:56:31<1:19:32,  1.93it/s, Loss=nan]2026-10-15 15:26:24,027 - INFO: [RENO] iter=20800 bpp=19.6843 anchor_num=20000
+2026-10-15 15:26:43,719 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20839; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  69%|██████▉   | 20800/30000 [1:57:22<1:19:32,  1.93it/s, Loss=nan]Training progress:  70%|██████▉   | 20900/30000 [1:57:22<1:18:26,  1.93it/s, Loss=nan]2026-10-15 15:27:35,409 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 20938; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:28:07,968 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 15:28:07,969 - INFO: 
+-----[ITER 21000] bits info (accurate): ttl_size_feat_MB=3.688208148814738, ttl_size_scaling_MB=1.3945990230422467, ttl_size_offsets_MB=1.4855107779148966, ttl_size_MB=6.568317949771881-----
+2026-10-15 15:28:07,969 - INFO: 
+-----[ITER 21000] bits info (approx from visible): bit_per_feat_param=1.7722721099853516, ttl_size_feat_MB_approx=5.456524969554266-----
+2026-10-15 15:28:07,969 - INFO: 
+-----[ITER 21000] bits info: anchor_num=516542-----
+2026-10-15 15:28:07,969 - INFO: 
+-----[ITER 21000] bits info: 1_rate_mask=0.6762064099311829, mask_numel=516542, mask_size_MB=0.055943652987480164-----
+2026-10-15 15:28:07,974 - INFO: 
+-----[ITER 21000] RENO anchor rate term: avg_bpp_per_anchor=19.6323 (raw=19.5697), anchor_count_soft=349289.0-----
+Training progress:  70%|██████▉   | 20900/30000 [1:58:15<1:18:26,  1.93it/s, Loss=nan]Training progress:  70%|███████   | 21000/30000 [1:58:15<1:18:06,  1.92it/s, Loss=nan]2026-10-15 15:28:08,269 - INFO: [RENO] iter=21000 bpp=19.6067 anchor_num=20000
+2026-10-15 15:28:19,450 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21021; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  70%|███████   | 21000/30000 [1:59:06<1:18:06,  1.92it/s, Loss=nan]Training progress:  70%|███████   | 21100/30000 [1:59:06<1:16:48,  1.93it/s, Loss=nan]2026-10-15 15:29:06,369 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21114; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  70%|███████   | 21100/30000 [1:59:57<1:16:48,  1.93it/s, Loss=nan]Training progress:  71%|███████   | 21200/30000 [1:59:57<1:15:46,  1.94it/s, Loss=nan]2026-10-15 15:29:50,766 - INFO: [RENO] iter=21200 bpp=19.5387 anchor_num=20000
+2026-10-15 15:30:09,986 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21239; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:30:38,449 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21294; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  71%|███████   | 21200/30000 [2:00:48<1:15:46,  1.94it/s, Loss=nan]Training progress:  71%|███████   | 21300/30000 [2:00:48<1:14:26,  1.95it/s, Loss=nan]Training progress:  71%|███████   | 21300/30000 [2:01:40<1:14:26,  1.95it/s, Loss=nan]Training progress:  71%|███████▏  | 21400/30000 [2:01:40<1:13:55,  1.94it/s, Loss=nan]2026-10-15 15:31:33,462 - INFO: [RENO] iter=21400 bpp=19.5975 anchor_num=20000
+2026-10-15 15:31:47,015 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21426; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  71%|███████▏  | 21400/30000 [2:02:30<1:13:55,  1.94it/s, Loss=nan]Training progress:  72%|███████▏  | 21500/30000 [2:02:30<1:12:29,  1.95it/s, Loss=nan]2026-10-15 15:32:40,007 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21531; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:33:08,689 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21589; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  72%|███████▏  | 21500/30000 [2:03:21<1:12:29,  1.95it/s, Loss=nan]Training progress:  72%|███████▏  | 21600/30000 [2:03:21<1:11:33,  1.96it/s, Loss=nan]2026-10-15 15:33:14,696 - INFO: [RENO] iter=21600 bpp=19.7011 anchor_num=20000
+Training progress:  72%|███████▏  | 21600/30000 [2:04:12<1:11:33,  1.96it/s, Loss=nan]Training progress:  72%|███████▏  | 21700/30000 [2:04:12<1:10:29,  1.96it/s, Loss=nan]2026-10-15 15:34:19,724 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21728; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:34:54,863 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21797; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  72%|███████▏  | 21700/30000 [2:05:03<1:10:29,  1.96it/s, Loss=nan]Training progress:  73%|███████▎  | 21800/30000 [2:05:03<1:09:49,  1.96it/s, Loss=nan]2026-10-15 15:34:56,673 - INFO: [RENO] iter=21800 bpp=19.6946 anchor_num=20000
+Training progress:  73%|███████▎  | 21800/30000 [2:05:54<1:09:49,  1.96it/s, Loss=nan]Training progress:  73%|███████▎  | 21900/30000 [2:05:54<1:08:43,  1.96it/s, Loss=nan]2026-10-15 15:36:10,583 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 21946; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:36:38,182 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 15:36:38,182 - INFO: 
+-----[ITER 22000] bits info (accurate): ttl_size_feat_MB=3.5491443891078234, ttl_size_scaling_MB=1.3576181405223906, ttl_size_offsets_MB=1.4236107205506414, ttl_size_MB=6.330373250180855-----
+2026-10-15 15:36:38,182 - INFO: 
+-----[ITER 22000] bits info (approx from visible): bit_per_feat_param=1.734239935874939, ttl_size_feat_MB_approx=5.339430361728148-----
+2026-10-15 15:36:38,182 - INFO: 
+-----[ITER 22000] bits info: anchor_num=516542-----
+2026-10-15 15:36:38,183 - INFO: 
+-----[ITER 22000] bits info: 1_rate_mask=0.6647359132766724, mask_numel=516542, mask_size_MB=0.056667499244213104-----
+2026-10-15 15:36:38,188 - INFO: 
+-----[ITER 22000] RENO anchor rate term: avg_bpp_per_anchor=19.6537 (raw=19.6257), anchor_count_soft=343364.0-----
+Training progress:  73%|███████▎  | 21900/30000 [2:06:45<1:08:43,  1.96it/s, Loss=nan]Training progress:  73%|███████▎  | 22000/30000 [2:06:45<1:08:04,  1.96it/s, Loss=nan]2026-10-15 15:36:38,555 - INFO: [RENO] iter=22000 bpp=19.7278 anchor_num=20000
+2026-10-15 15:36:47,789 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22017; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:37:28,786 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22097; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  73%|███████▎  | 22000/30000 [2:07:37<1:08:04,  1.96it/s, Loss=nan]Training progress:  74%|███████▎  | 22100/30000 [2:07:37<1:07:36,  1.95it/s, Loss=nan]2026-10-15 15:37:54,977 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22150; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  74%|███████▎  | 22100/30000 [2:08:27<1:07:36,  1.95it/s, Loss=nan]Training progress:  74%|███████▍  | 22200/30000 [2:08:27<1:06:06,  1.97it/s, Loss=nan]2026-10-15 15:38:20,299 - INFO: [RENO] iter=22200 bpp=19.7102 anchor_num=20000
+2026-10-15 15:38:53,366 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22265; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  74%|███████▍  | 22200/30000 [2:09:18<1:06:06,  1.97it/s, Loss=nan]Training progress:  74%|███████▍  | 22300/30000 [2:09:18<1:05:18,  1.97it/s, Loss=nan]2026-10-15 15:39:44,587 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22367; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  74%|███████▍  | 22300/30000 [2:10:07<1:05:18,  1.97it/s, Loss=nan]Training progress:  75%|███████▍  | 22400/30000 [2:10:07<1:03:52,  1.98it/s, Loss=nan]2026-10-15 15:40:00,624 - INFO: [RENO] iter=22400 bpp=19.5707 anchor_num=20000
+Training progress:  75%|███████▍  | 22400/30000 [2:10:58<1:03:52,  1.98it/s, Loss=nan]Training progress:  75%|███████▌  | 22500/30000 [2:10:58<1:03:09,  1.98it/s, Loss=nan]2026-10-15 15:41:06,557 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22529; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:41:41,071 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22597; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  75%|███████▌  | 22500/30000 [2:11:49<1:03:09,  1.98it/s, Loss=nan]Training progress:  75%|███████▌  | 22600/30000 [2:11:49<1:02:35,  1.97it/s, Loss=nan]2026-10-15 15:41:42,653 - INFO: [RENO] iter=22600 bpp=19.5729 anchor_num=20000
+2026-10-15 15:42:09,562 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22654; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  75%|███████▌  | 22600/30000 [2:12:38<1:02:35,  1.97it/s, Loss=nan]Training progress:  76%|███████▌  | 22700/30000 [2:12:38<1:01:10,  1.99it/s, Loss=nan]2026-10-15 15:43:10,694 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22773; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  76%|███████▌  | 22700/30000 [2:13:30<1:01:10,  1.99it/s, Loss=nan]Training progress:  76%|███████▌  | 22800/30000 [2:13:30<1:00:50,  1.97it/s, Loss=nan]2026-10-15 15:43:23,535 - INFO: [RENO] iter=22800 bpp=19.6171 anchor_num=20000
+2026-10-15 15:43:44,627 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22841; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  76%|███████▌  | 22800/30000 [2:14:21<1:00:50,  1.97it/s, Loss=nan]Training progress:  76%|███████▋  | 22900/30000 [2:14:21<1:00:00,  1.97it/s, Loss=nan]2026-10-15 15:44:56,335 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 22982; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+[DEBUG LevelSEGate gate_yz] step=16000 per-level mean=['0.867', '0.876', '0.880', '0.885'] std=['0.002', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:43:04]
+[DEBUG Q_feat_adj] step=16000 no_cond: 0.0958/0.5495 cond: 0.0159/0.8910 Q_feat_if_cond: 0.9551 [15/10 14:43:04]
+[DEBUG Q_feat_prepass] step=17000 Q_feat_adj: -0.0455/0.3626 Q_feat: 0.9483 [15/10 14:52:27]
+[DEBUG LevelSEGate gate_xyz] step=17000 per-level mean=['0.866', '0.857', '0.856', '0.863', '0.845', '0.857', '0.866', '0.868', '0.866', '0.890', '0.869', '0.875'] std=['0.001', '0.002', '0.002', '0.002', '0.004', '0.002', '0.002', '0.001', '0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:52:27]
+[DEBUG LevelSEGate gate_xy] step=17000 per-level mean=['0.875', '0.876', '0.882', '0.887'] std=['0.001', '0.000', '0.000', '0.002'] (init was a uniform 0.881 for every level) [15/10 14:52:27]
+[DEBUG LevelSEGate gate_xz] step=17000 per-level mean=['0.867', '0.882', '0.887', '0.888'] std=['0.003', '0.001', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 14:52:27]
+[DEBUG LevelSEGate gate_yz] step=17000 per-level mean=['0.865', '0.875', '0.880', '0.885'] std=['0.002', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 14:52:27]
+[DEBUG Q_feat_adj] step=17000 no_cond: 0.0746/0.5633 cond: -0.0576/0.9530 Q_feat_if_cond: 0.9139 [15/10 14:52:27]
+[DEBUG Q_feat_prepass] step=18000 Q_feat_adj: -0.2550/0.2387 Q_feat: 0.7618 [15/10 15:01:40]
+[DEBUG LevelSEGate gate_xyz] step=18000 per-level mean=['0.865', '0.857', '0.855', '0.862', '0.844', '0.858', '0.865', '0.868', '0.866', '0.889', '0.867', '0.875'] std=['0.001', '0.002', '0.002', '0.001', '0.003', '0.002', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:01:40]
+[DEBUG LevelSEGate gate_xy] step=18000 per-level mean=['0.875', '0.876', '0.883', '0.887'] std=['0.001', '0.000', '0.000', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:01:40]
+[DEBUG LevelSEGate gate_xz] step=18000 per-level mean=['0.870', '0.881', '0.884', '0.885'] std=['0.002', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [15/10 15:01:40]
+[DEBUG LevelSEGate gate_yz] step=18000 per-level mean=['0.863', '0.875', '0.880', '0.885'] std=['0.002', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:01:40]
+[DEBUG Q_feat_adj] step=18000 no_cond: 0.0587/0.5335 cond: -0.1519/0.8577 Q_feat_if_cond: 0.8509 [15/10 15:01:40]
+[DEBUG Q_feat_prepass] step=19000 Q_feat_adj: -0.0314/0.3538 Q_feat: 0.9610 [15/10 15:10:41]
+[DEBUG LevelSEGate gate_xyz] step=19000 per-level mean=['0.864', '0.857', '0.855', '0.863', '0.843', '0.860', '0.864', '0.868', '0.865', '0.890', '0.866', '0.876'] std=['0.002', '0.002', '0.002', '0.002', '0.004', '0.002', '0.002', '0.001', '0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:10:41]
+[DEBUG LevelSEGate gate_xy] step=19000 per-level mean=['0.875', '0.876', '0.883', '0.888'] std=['0.001', '0.000', '0.000', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:10:41]
+[DEBUG LevelSEGate gate_xz] step=19000 per-level mean=['0.865', '0.882', '0.888', '0.888'] std=['0.003', '0.001', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:10:41]
+[DEBUG LevelSEGate gate_yz] step=19000 per-level mean=['0.863', '0.875', '0.880', '0.885'] std=['0.002', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:10:41]
+[DEBUG Q_feat_adj] step=19000 no_cond: 0.0807/0.5817 cond: -0.0273/0.7206 Q_feat_if_cond: 0.9401 [15/10 15:10:41]
+[DEBUG Q_feat_prepass] step=20000 Q_feat_adj: -0.2782/0.2306 Q_feat: 0.7406 [15/10 15:19:27]
+[DEBUG LevelSEGate gate_xyz] step=20000 per-level mean=['0.865', '0.857', '0.855', '0.862', '0.843', '0.860', '0.864', '0.869', '0.866', '0.889', '0.865', '0.876'] std=['0.001', '0.002', '0.002', '0.002', '0.003', '0.002', '0.002', '0.001', '0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:19:27]
+[DEBUG LevelSEGate gate_xy] step=20000 per-level mean=['0.875', '0.876', '0.883', '0.888'] std=['0.001', '0.000', '0.000', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:19:27]
+[DEBUG LevelSEGate gate_xz] step=20000 per-level mean=['0.869', '0.881', '0.885', '0.885'] std=['0.002', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [15/10 15:19:27]
+[DEBUG LevelSEGate gate_yz] step=20000 per-level mean=['0.861', '0.874', '0.880', '0.885'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:19:27]
+[DEBUG Q_feat_adj] step=20000 no_cond: 0.0295/0.5001 cond: -0.1620/0.7482 Q_feat_if_cond: 0.8441 [15/10 15:19:27]
+==== MASK GRAD DEBUG ==== [15/10 15:19:28]
+_mask: mean=-6.1594, grad_none=False, grad_norm=2.9443e-05 [15/10 15:19:28]
+_mask sigmoid mean=0.1383, grad_none=False, grad_norm=2.9443e-05 [15/10 15:19:28]
+[DEBUG Q_feat_prepass] step=21000 Q_feat_adj: -0.1776/0.2772 Q_feat: 0.8361 [15/10 15:28:06]
+[DEBUG LevelSEGate gate_xyz] step=21000 per-level mean=['0.864', '0.857', '0.854', '0.862', '0.841', '0.860', '0.864', '0.868', '0.866', '0.890', '0.864', '0.877'] std=['0.002', '0.002', '0.003', '0.002', '0.004', '0.002', '0.002', '0.001', '0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:28:06]
+[DEBUG LevelSEGate gate_xy] step=21000 per-level mean=['0.875', '0.876', '0.884', '0.888'] std=['0.001', '0.000', '0.000', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:28:06]
+[DEBUG LevelSEGate gate_xz] step=21000 per-level mean=['0.867', '0.882', '0.887', '0.887'] std=['0.004', '0.001', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:28:06]
+[DEBUG LevelSEGate gate_yz] step=21000 per-level mean=['0.860', '0.874', '0.880', '0.886'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:28:06]
+[DEBUG Q_feat_adj] step=21000 no_cond: -0.0004/0.5045 cond: -0.1520/0.7508 Q_feat_if_cond: 0.8594 [15/10 15:28:06]
+[DEBUG Q_feat_prepass] step=22000 Q_feat_adj: -0.0664/0.2957 Q_feat: 0.9369 [15/10 15:36:37]
+[DEBUG LevelSEGate gate_xyz] step=22000 per-level mean=['0.863', '0.857', '0.852', '0.861', '0.839', '0.860', '0.862', '0.868', '0.866', '0.891', '0.862', '0.876'] std=['0.002', '0.002', '0.003', '0.002', '0.004', '0.002', '0.002', '0.002', '0.001', '0.002', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:36:37]
+[DEBUG LevelSEGate gate_xy] step=22000 per-level mean=['0.875', '0.876', '0.884', '0.888'] std=['0.001', '0.000', '0.000', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:36:37]
+[DEBUG LevelSEGate gate_xz] step=22000 per-level mean=['0.864', '0.883', '0.889', '0.889'] std=['0.004', '0.001', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:36:37]
+[DEBUG LevelSEGate gate_yz] step=22000 per-level mean=['0.860', '0.874', '0.880', '0.886'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:36:37]
+[DEBUG Q_feat_adj] step=22000 no_cond: 0.0138/0.4933 cond: -0.1194/0.7481 Q_feat_if_cond: 0.8846 [15/10 15:36:37]
+[DEBUG Q_feat_prepass] step=23000 Q_feat_adj: -0.3287/0.2665 Q_feat: 0.7000 [15/10 15:45:04]
+[DEBUG LevelSEGate gate_xyz] step=23000 per-level mean=['0.864', '0.858', '0.854', '0.862', '0.842', '0.861', '0.863', '0.869', '0.867', '0.889', '0.862', '0.876'] std=['0.001', '0.002', '0.002', '0.002', '0.004', '0.001', '0.002', '0.001', '0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:45:04]
+[DEBUG LevelSEGate gate_xy] step=23000 per-level mean=['0.874', '0.876', '0.884', '0.889'] std=['0.001', '0.000', '0.000', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:45:04]
+[DEBUG LevelSEGate gate_xz] step=23000 per-level mean=['0.868', '0.881', '0.885', '0.886'] std=['0.002', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [15/10 15:45:04]
+2026-10-15 15:45:05,376 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 15:45:05,376 - INFO: 
+-----[ITER 23000] bits info (accurate): ttl_size_feat_MB=3.516658693552017, ttl_size_scaling_MB=1.3422957304865122, ttl_size_offsets_MB=1.3880140515975654, ttl_size_MB=6.246968475636095-----
+2026-10-15 15:45:05,377 - INFO: 
+-----[ITER 23000] bits info (approx from visible): bit_per_feat_param=1.7446368932724, ttl_size_feat_MB_approx=5.3714408285898685-----
+2026-10-15 15:45:05,377 - INFO: 
+-----[ITER 23000] bits info: anchor_num=516542-----
+2026-10-15 15:45:05,377 - INFO: 
+-----[ITER 23000] bits info: 1_rate_mask=0.6553078293800354, mask_numel=516542, mask_size_MB=0.05722314864397049-----
+2026-10-15 15:45:05,382 - INFO: 
+-----[ITER 23000] RENO anchor rate term: avg_bpp_per_anchor=19.6642 (raw=19.6617), anchor_count_soft=338494.0-----
+Training progress:  76%|███████▋  | 22900/30000 [2:15:12<1:00:00,  1.97it/s, Loss=nan]Training progress:  77%|███████▋  | 23000/30000 [2:15:12<59:22,  1.96it/s, Loss=nan]  2026-10-15 15:45:05,591 - INFO: [RENO] iter=23000 bpp=19.5975 anchor_num=20000
+2026-10-15 15:45:42,341 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23074; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  77%|███████▋  | 23000/30000 [2:16:03<59:22,  1.96it/s, Loss=nan]Training progress:  77%|███████▋  | 23100/30000 [2:16:03<58:28,  1.97it/s, Loss=nan]2026-10-15 15:46:41,452 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23191; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  77%|███████▋  | 23100/30000 [2:16:52<58:28,  1.97it/s, Loss=nan]Training progress:  77%|███████▋  | 23200/30000 [2:16:52<57:10,  1.98it/s, Loss=nan]2026-10-15 15:46:45,825 - INFO: [RENO] iter=23200 bpp=19.5832 anchor_num=20000
+Training progress:  77%|███████▋  | 23200/30000 [2:17:43<57:10,  1.98it/s, Loss=nan]Training progress:  78%|███████▊  | 23300/30000 [2:17:43<56:23,  1.98it/s, Loss=nan]2026-10-15 15:47:41,998 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23311; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:48:26,424 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23399; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  78%|███████▊  | 23300/30000 [2:18:34<56:23,  1.98it/s, Loss=nan]Training progress:  78%|███████▊  | 23400/30000 [2:18:34<55:34,  1.98it/s, Loss=nan]2026-10-15 15:48:27,024 - INFO: [RENO] iter=23400 bpp=19.7214 anchor_num=20000
+Training progress:  78%|███████▊  | 23400/30000 [2:19:23<55:34,  1.98it/s, Loss=nan]Training progress:  78%|███████▊  | 23500/30000 [2:19:23<54:27,  1.99it/s, Loss=nan]2026-10-15 15:49:22,736 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23512; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:49:57,907 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23582; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  78%|███████▊  | 23500/30000 [2:20:13<54:27,  1.99it/s, Loss=nan]Training progress:  79%|███████▊  | 23600/30000 [2:20:13<53:33,  1.99it/s, Loss=nan]2026-10-15 15:50:06,780 - INFO: [RENO] iter=23600 bpp=19.6397 anchor_num=20000
+2026-10-15 15:50:45,234 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23676; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  79%|███████▊  | 23600/30000 [2:21:03<53:33,  1.99it/s, Loss=nan]Training progress:  79%|███████▉  | 23700/30000 [2:21:03<52:42,  1.99it/s, Loss=nan]Training progress:  79%|███████▉  | 23700/30000 [2:21:53<52:42,  1.99it/s, Loss=nan]Training progress:  79%|███████▉  | 23800/30000 [2:21:53<51:46,  2.00it/s, Loss=nan]2026-10-15 15:51:46,811 - INFO: [RENO] iter=23800 bpp=19.6719 anchor_num=20000
+2026-10-15 15:51:48,575 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23803; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:52:15,966 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 23859; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  79%|███████▉  | 23800/30000 [2:22:44<51:46,  2.00it/s, Loss=nan]Training progress:  80%|███████▉  | 23900/30000 [2:22:44<50:58,  1.99it/s, Loss=nan]2026-10-15 15:53:28,105 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 15:53:28,106 - INFO: 
+-----[ITER 24000] bits info (accurate): ttl_size_feat_MB=3.448831768706441, ttl_size_scaling_MB=1.3292733430862427, ttl_size_offsets_MB=1.3548766626045108, ttl_size_MB=6.132981774397194-----
+2026-10-15 15:53:28,106 - INFO: 
+-----[ITER 24000] bits info (approx from visible): bit_per_feat_param=1.7332240343093872, ttl_size_feat_MB_approx=5.336302573265073-----
+2026-10-15 15:53:28,106 - INFO: 
+-----[ITER 24000] bits info: anchor_num=516542-----
+2026-10-15 15:53:28,107 - INFO: 
+-----[ITER 24000] bits info: 1_rate_mask=0.6471671462059021, mask_numel=516542, mask_size_MB=0.05767478048801422-----
+2026-10-15 15:53:28,112 - INFO: 
+-----[ITER 24000] RENO anchor rate term: avg_bpp_per_anchor=19.6642 (raw=19.6325), anchor_count_soft=334289.0-----
+Training progress:  80%|███████▉  | 23900/30000 [2:23:35<50:58,  1.99it/s, Loss=nan]Training progress:  80%|████████  | 24000/30000 [2:23:35<50:32,  1.98it/s, Loss=nan]2026-10-15 15:53:28,390 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24000; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:53:28,490 - INFO: [RENO] iter=24000 bpp=19.6842 anchor_num=20000
+Training progress:  80%|████████  | 24000/30000 [2:24:24<50:32,  1.98it/s, Loss=nan]Training progress:  80%|████████  | 24100/30000 [2:24:24<49:21,  1.99it/s, Loss=nan]2026-10-15 15:54:19,495 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24103; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 15:54:57,341 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24177; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  80%|████████  | 24100/30000 [2:25:15<49:21,  1.99it/s, Loss=nan]Training progress:  81%|████████  | 24200/30000 [2:25:15<48:40,  1.99it/s, Loss=nan]2026-10-15 15:55:08,592 - INFO: [RENO] iter=24200 bpp=19.6496 anchor_num=20000
+2026-10-15 15:55:56,527 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24296; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  81%|████████  | 24200/30000 [2:26:05<48:40,  1.99it/s, Loss=nan]Training progress:  81%|████████  | 24300/30000 [2:26:05<47:39,  1.99it/s, Loss=nan]2026-10-15 15:56:21,559 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24347; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  81%|████████  | 24300/30000 [2:26:55<47:39,  1.99it/s, Loss=nan]Training progress:  81%|████████▏ | 24400/30000 [2:26:55<46:48,  1.99it/s, Loss=nan]2026-10-15 15:56:48,431 - INFO: [RENO] iter=24400 bpp=19.6381 anchor_num=20000
+2026-10-15 15:57:02,650 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24428; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  81%|████████▏ | 24400/30000 [2:27:44<46:48,  1.99it/s, Loss=nan]Training progress:  82%|████████▏ | 24500/30000 [2:27:44<45:45,  2.00it/s, Loss=nan]2026-10-15 15:57:38,441 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24501; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  82%|████████▏ | 24500/30000 [2:28:34<45:45,  2.00it/s, Loss=nan]Training progress:  82%|████████▏ | 24600/30000 [2:28:34<44:51,  2.01it/s, Loss=nan]2026-10-15 15:58:27,492 - INFO: [RENO] iter=24600 bpp=19.7582 anchor_num=20000
+2026-10-15 15:58:37,948 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24622; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  82%|████████▏ | 24600/30000 [2:29:24<44:51,  2.01it/s, Loss=nan]Training progress:  82%|████████▏ | 24700/30000 [2:29:24<43:56,  2.01it/s, Loss=nan]2026-10-15 15:59:26,395 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24718; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  82%|████████▏ | 24700/30000 [2:30:14<43:56,  2.01it/s, Loss=nan]Training progress:  83%|████████▎ | 24800/30000 [2:30:14<43:12,  2.01it/s, Loss=nan]2026-10-15 16:00:07,133 - INFO: [RENO] iter=24800 bpp=19.6630 anchor_num=20000
+2026-10-15 16:00:21,825 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24829; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  83%|████████▎ | 24800/30000 [2:31:04<43:12,  2.01it/s, Loss=nan]Training progress:  83%|████████▎ | 24900/30000 [2:31:04<42:28,  2.00it/s, Loss=nan]2026-10-15 16:01:27,988 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 24963; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:01:47,772 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 16:01:47,772 - INFO: 
+-----[ITER 25000] bits info (accurate): ttl_size_feat_MB=3.3813020391389728, ttl_size_scaling_MB=1.3097031954675913, ttl_size_offsets_MB=1.3208046627696604, ttl_size_MB=6.011809897376224-----
+2026-10-15 16:01:47,773 - INFO: 
+-----[ITER 25000] bits info (approx from visible): bit_per_feat_param=1.7233591079711914, ttl_size_feat_MB_approx=5.3059301397183845-----
+2026-10-15 16:01:47,773 - INFO: 
+-----[ITER 25000] bits info: anchor_num=516542-----
+2026-10-15 16:01:47,773 - INFO: 
+-----[ITER 25000] bits info: 1_rate_mask=0.6402093768119812, mask_numel=516542, mask_size_MB=0.05804033949971199-----
+2026-10-15 16:01:47,778 - INFO: 
+-----[ITER 25000] RENO anchor rate term: avg_bpp_per_anchor=19.6748 (raw=19.6524), anchor_count_soft=330695.0-----
+Training progress:  83%|████████▎ | 24900/30000 [2:31:55<42:28,  2.00it/s, Loss=nan]Training progress:  83%|████████▎ | 25000/30000 [2:31:55<41:50,  1.99it/s, Loss=nan]2026-10-15 16:01:48,157 - INFO: [RENO] iter=25000 bpp=19.7251 anchor_num=20000
+2026-10-15 16:02:31,646 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25088; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  83%|████████▎ | 25000/30000 [2:32:44<41:50,  1.99it/s, Loss=nan]Training progress:  84%|████████▎ | 25100/30000 [2:32:44<40:47,  2.00it/s, Loss=nan]2026-10-15 16:02:49,702 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25125; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  84%|████████▎ | 25100/30000 [2:33:34<40:47,  2.00it/s, Loss=nan]Training progress:  84%|████████▍ | 25200/30000 [2:33:34<39:57,  2.00it/s, Loss=nan]2026-10-15 16:03:27,440 - INFO: [RENO] iter=25200 bpp=19.6031 anchor_num=20000
+2026-10-15 16:03:41,086 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25228; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  84%|████████▍ | 25200/30000 [2:34:24<39:57,  2.00it/s, Loss=nan]Training progress:  84%|████████▍ | 25300/30000 [2:34:24<39:02,  2.01it/s, Loss=nan]2026-10-15 16:04:22,710 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25312; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  84%|████████▍ | 25300/30000 [2:35:14<39:02,  2.01it/s, Loss=nan]Training progress:  85%|████████▍ | 25400/30000 [2:35:14<38:21,  2.00it/s, Loss=nan]2026-10-15 16:05:07,475 - INFO: [RENO] iter=25400 bpp=19.6540 anchor_num=20000
+2026-10-15 16:05:28,295 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25441; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  85%|████████▍ | 25400/30000 [2:36:03<38:21,  2.00it/s, Loss=nan]Training progress:  85%|████████▌ | 25500/30000 [2:36:03<37:21,  2.01it/s, Loss=nan]2026-10-15 16:06:17,377 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25541; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:06:44,689 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25596; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  85%|████████▌ | 25500/30000 [2:36:53<37:21,  2.01it/s, Loss=nan]Training progress:  85%|████████▌ | 25600/30000 [2:36:53<36:34,  2.00it/s, Loss=nan]2026-10-15 16:06:46,832 - INFO: [RENO] iter=25600 bpp=19.6226 anchor_num=20000
+Training progress:  85%|████████▌ | 25600/30000 [2:37:43<36:34,  2.00it/s, Loss=nan]Training progress:  86%|████████▌ | 25700/30000 [2:37:43<35:36,  2.01it/s, Loss=nan]2026-10-15 16:08:02,612 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25753; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:08:16,649 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25780; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  86%|████████▌ | 25700/30000 [2:38:33<35:36,  2.01it/s, Loss=nan]Training progress:  86%|████████▌ | 25800/30000 [2:38:33<34:57,  2.00it/s, Loss=nan]2026-10-15 16:08:26,614 - INFO: [RENO] iter=25800 bpp=19.7360 anchor_num=20000
+Training progress:  86%|████████▌ | 25800/30000 [2:39:22<34:57,  2.00it/s, Loss=nan]Training progress:  86%|████████▋ | 25900/30000 [2:39:22<33:52,  2.02it/s, Loss=nan]2026-10-15 16:09:17,008 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 25903; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:10:04,914 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 16:10:04,914 - INFO: 
+-----[ITER 26000] bits info (accurate): ttl_size_feat_MB=3.3577412315644324, ttl_size_scaling_MB=1.2944724111584947, ttl_size_offsets_MB=1.2959108476061374, ttl_size_MB=5.948124490329064-----
+2026-10-15 16:10:04,914 - INFO: 
+-----[ITER 26000] bits info (approx from visible): bit_per_feat_param=1.7166686058044434, ttl_size_feat_MB_approx=5.285331219312184-----
+2026-10-15 16:10:04,915 - INFO: 
+-----[ITER 26000] bits info: anchor_num=516542-----
+2026-10-15 16:10:04,915 - INFO: 
+-----[ITER 26000] bits info: 1_rate_mask=0.6341904997825623, mask_numel=516542, mask_size_MB=0.05834150314331055-----
+2026-10-15 16:10:04,920 - INFO: 
+-----[ITER 26000] RENO anchor rate term: avg_bpp_per_anchor=19.6750 (raw=19.7374), anchor_count_soft=327586.0-----
+Training progress:  86%|████████▋ | 25900/30000 [2:40:12<33:52,  2.02it/s, Loss=nan]Training progress:  87%|████████▋ | 26000/30000 [2:40:12<33:05,  2.01it/s, Loss=nan]2026-10-15 16:10:05,139 - INFO: [RENO] iter=26000 bpp=19.5398 anchor_num=20000
+2026-10-15 16:10:13,915 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26017; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  87%|████████▋ | 26000/30000 [2:41:02<33:05,  2.01it/s, Loss=nan]Training progress:  87%|████████▋ | 26100/30000 [2:41:02<32:26,  2.00it/s, Loss=nan]2026-10-15 16:11:13,850 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26137; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:11:37,118 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26186; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  87%|████████▋ | 26100/30000 [2:41:51<32:26,  2.00it/s, Loss=nan]Training progress:  87%|████████▋ | 26200/30000 [2:41:51<31:23,  2.02it/s, Loss=nan]2026-10-15 16:11:44,461 - INFO: [RENO] iter=26200 bpp=19.7539 anchor_num=20000
+2026-10-15 16:12:32,179 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26298; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  87%|████████▋ | 26200/30000 [2:42:40<31:23,  2.02it/s, Loss=nan]Training progress:  88%|████████▊ | 26300/30000 [2:42:40<30:27,  2.02it/s, Loss=nan]Training progress:  88%|████████▊ | 26300/30000 [2:43:29<30:27,  2.02it/s, Loss=nan]Training progress:  88%|████████▊ | 26400/30000 [2:43:29<29:36,  2.03it/s, Loss=nan]2026-10-15 16:13:22,712 - INFO: [RENO] iter=26400 bpp=19.7657 anchor_num=20000
+2026-10-15 16:13:34,059 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26423; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  88%|████████▊ | 26400/30000 [2:44:18<29:36,  2.03it/s, Loss=nan]Training progress:  88%|████████▊ | 26500/30000 [2:44:18<28:42,  2.03it/s, Loss=nan]2026-10-15 16:14:33,208 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26544; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:14:56,658 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26591; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  88%|████████▊ | 26500/30000 [2:45:08<28:42,  2.03it/s, Loss=nan]Training progress:  89%|████████▊ | 26600/30000 [2:45:08<27:54,  2.03it/s, Loss=nan]2026-10-15 16:15:00,965 - INFO: [RENO] iter=26600 bpp=19.6570 anchor_num=20000
+2026-10-15 16:15:49,351 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26699; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  89%|████████▊ | 26600/30000 [2:45:56<27:54,  2.03it/s, Loss=nan]Training progress:  89%|████████▉ | 26700/30000 [2:45:56<27:01,  2.03it/s, Loss=nan]Training progress:  89%|████████▉ | 26700/30000 [2:46:45<27:01,  2.03it/s, Loss=nan]Training progress:  89%|████████▉ | 26800/30000 [2:46:45<26:10,  2.04it/s, Loss=nan]2026-10-15 16:16:38,727 - INFO: [RENO] iter=26800 bpp=19.6477 anchor_num=20000
+2026-10-15 16:16:44,304 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26811; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:17:05,805 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26855; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  89%|████████▉ | 26800/30000 [2:47:34<26:10,  2.04it/s, Loss=nan]Training progress:  90%|████████▉ | 26900/30000 [2:47:34<25:18,  2.04it/s, Loss=nan]2026-10-15 16:18:05,701 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 26978; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:18:17,421 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 16:18:17,422 - INFO: 
+-----[ITER 27000] bits info (accurate): ttl_size_feat_MB=3.318262256681919, ttl_size_scaling_MB=1.290294777136296, ttl_size_offsets_MB=1.2773184557445347, ttl_size_MB=5.88587548956275-----
+2026-10-15 16:18:17,422 - INFO: 
+-----[ITER 27000] bits info (approx from visible): bit_per_feat_param=1.7103146314620972, ttl_size_feat_MB_approx=5.265768410949079-----
+2026-10-15 16:18:17,422 - INFO: 
+-----[ITER 27000] bits info: anchor_num=516542-----
+2026-10-15 16:18:17,423 - INFO: 
+-----[ITER 27000] bits info: 1_rate_mask=0.6288124322891235, mask_numel=516542, mask_size_MB=0.05859886109828949-----
+2026-10-15 16:18:17,428 - INFO: 
+-----[ITER 27000] RENO anchor rate term: avg_bpp_per_anchor=19.6758 (raw=19.6575), anchor_count_soft=324808.0-----
+Training progress:  90%|████████▉ | 26900/30000 [2:48:24<25:18,  2.04it/s, Loss=nan]Training progress:  90%|█████████ | 27000/30000 [2:48:24<24:40,  2.03it/s, Loss=nan]2026-10-15 16:18:17,718 - INFO: [RENO] iter=27000 bpp=19.6166 anchor_num=20000
+Training progress:  90%|█████████ | 27000/30000 [2:49:13<24:40,  2.03it/s, Loss=nan]Training progress:  90%|█████████ | 27100/30000 [2:49:13<23:48,  2.03it/s, Loss=nan]2026-10-15 16:19:10,537 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27107; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:19:29,417 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27147; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  90%|█████████ | 27100/30000 [2:50:01<23:48,  2.03it/s, Loss=nan]Training progress:  91%|█████████ | 27200/30000 [2:50:01<22:47,  2.05it/s, Loss=nan]2026-10-15 16:19:54,584 - INFO: [RENO] iter=27200 bpp=19.5895 anchor_num=20000
+Training progress:  91%|█████████ | 27200/30000 [2:50:50<22:47,  2.05it/s, Loss=nan]Training progress:  91%|█████████ | 27300/30000 [2:50:50<21:59,  2.05it/s, Loss=nan]2026-10-15 16:20:47,924 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27309; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  91%|█████████ | 27300/30000 [2:51:40<21:59,  2.05it/s, Loss=nan]Training progress:  91%|█████████▏| 27400/30000 [2:51:40<21:18,  2.03it/s, Loss=nan]2026-10-15 16:21:33,376 - INFO: [RENO] iter=27400 bpp=19.6477 anchor_num=20000
+2026-10-15 16:21:40,789 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27416; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  91%|█████████▏| 27400/30000 [2:52:29<21:18,  2.03it/s, Loss=nan]Training progress:  92%|█████████▏| 27500/30000 [2:52:29<20:25,  2.04it/s, Loss=nan]2026-10-15 16:22:29,209 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27514; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:22:45,386 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27547; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  92%|█████████▏| 27500/30000 [2:53:18<20:25,  2.04it/s, Loss=nan]Training progress:  92%|█████████▏| 27600/30000 [2:53:18<19:37,  2.04it/s, Loss=nan]2026-10-15 16:23:11,182 - INFO: [RENO] iter=27600 bpp=19.6752 anchor_num=20000
+2026-10-15 16:23:53,929 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27688; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  92%|█████████▏| 27600/30000 [2:54:06<19:37,  2.04it/s, Loss=nan]Training progress:  92%|█████████▏| 27700/30000 [2:54:06<18:44,  2.05it/s, Loss=nan]2026-10-15 16:24:32,568 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27767; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  92%|█████████▏| 27700/30000 [2:54:56<18:44,  2.05it/s, Loss=nan]Training progress:  93%|█████████▎| 27800/30000 [2:54:56<18:00,  2.04it/s, Loss=nan]2026-10-15 16:24:49,268 - INFO: [RENO] iter=27800 bpp=19.6654 anchor_num=20000
+2026-10-15 16:25:25,543 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27876; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  93%|█████████▎| 27800/30000 [2:55:44<18:00,  2.04it/s, Loss=nan]Training progress:  93%|█████████▎| 27900/30000 [2:55:44<17:06,  2.05it/s, Loss=nan]2026-10-15 16:26:13,367 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 27970; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:26:28,829 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 16:26:28,829 - INFO: 
+-----[ITER 28000] bits info (accurate): ttl_size_feat_MB=3.2937339348718524, ttl_size_scaling_MB=1.2808014899492264, ttl_size_offsets_MB=1.2575549646280706, ttl_size_MB=5.832090389449149-----
+2026-10-15 16:26:28,829 - INFO: 
+-----[ITER 28000] bits info (approx from visible): bit_per_feat_param=1.6997547149658203, ttl_size_feat_MB_approx=5.233256220685689-----
+2026-10-15 16:26:28,830 - INFO: 
+-----[ITER 28000] bits info: anchor_num=516542-----
+2026-10-15 16:26:28,830 - INFO: 
+-----[ITER 28000] bits info: 1_rate_mask=0.6241235136985779, mask_numel=516542, mask_size_MB=0.05881424993276596-----
+2026-10-15 16:26:28,835 - INFO: 
+-----[ITER 28000] RENO anchor rate term: avg_bpp_per_anchor=19.6744 (raw=19.6977), anchor_count_soft=322386.0-----
+Training progress:  93%|█████████▎| 27900/30000 [2:56:36<17:06,  2.05it/s, Loss=nan]Training progress:  93%|█████████▎| 28000/30000 [2:56:36<16:33,  2.01it/s, Loss=nan]2026-10-15 16:26:29,133 - INFO: [RENO] iter=28000 bpp=19.6605 anchor_num=20000
+2026-10-15 16:26:53,754 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28052; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  93%|█████████▎| 28000/30000 [2:57:24<16:33,  2.01it/s, Loss=nan]Training progress:  94%|█████████▎| 28100/30000 [2:57:24<15:34,  2.03it/s, Loss=nan]Training progress:  94%|█████████▎| 28100/30000 [2:58:13<15:34,  2.03it/s, Loss=nan]Training progress:  94%|█████████▍| 28200/30000 [2:58:13<14:46,  2.03it/s, Loss=nan]2026-10-15 16:28:06,531 - INFO: [RENO] iter=28200 bpp=19.7513 anchor_num=20000
+2026-10-15 16:28:15,526 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28218; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:28:29,394 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28246; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  94%|█████████▍| 28200/30000 [2:59:02<14:46,  2.03it/s, Loss=nan]Training progress:  94%|█████████▍| 28300/30000 [2:59:02<13:57,  2.03it/s, Loss=nan]Training progress:  94%|█████████▍| 28300/30000 [2:59:51<13:57,  2.03it/s, Loss=nan]Training progress:  95%|█████████▍| 28400/30000 [2:59:51<13:06,  2.03it/s, Loss=nan]2026-10-15 16:29:44,812 - INFO: [RENO] iter=28400 bpp=19.7958 anchor_num=20000
+2026-10-15 16:29:53,301 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28417; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:30:10,042 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28451; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  95%|█████████▍| 28400/30000 [3:00:40<13:06,  2.03it/s, Loss=nan]Training progress:  95%|█████████▌| 28500/30000 [3:00:40<12:14,  2.04it/s, Loss=nan]2026-10-15 16:30:46,283 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28526; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  95%|█████████▌| 28500/30000 [3:01:30<12:14,  2.04it/s, Loss=nan]Training progress:  95%|█████████▌| 28600/30000 [3:01:30<11:28,  2.03it/s, Loss=nan]2026-10-15 16:31:22,991 - INFO: [RENO] iter=28600 bpp=19.7067 anchor_num=20000
+2026-10-15 16:31:39,623 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28635; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  95%|█████████▌| 28600/30000 [3:02:18<11:28,  2.03it/s, Loss=nan]Training progress:  96%|█████████▌| 28700/30000 [3:02:18<10:35,  2.04it/s, Loss=nan]2026-10-15 16:32:52,924 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28784; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  96%|█████████▌| 28700/30000 [3:03:08<10:35,  2.04it/s, Loss=nan]Training progress:  96%|█████████▌| 28800/30000 [3:03:08<09:49,  2.03it/s, Loss=nan]2026-10-15 16:33:01,033 - INFO: [RENO] iter=28800 bpp=19.6904 anchor_num=20000
+2026-10-15 16:33:26,196 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28852; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  96%|█████████▌| 28800/30000 [3:03:56<09:49,  2.03it/s, Loss=nan]Training progress:  96%|█████████▋| 28900/30000 [3:03:56<08:59,  2.04it/s, Loss=nan]2026-10-15 16:34:04,455 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 28929; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:34:40,220 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 16:34:40,221 - INFO: 
+-----[ITER 29000] bits info (accurate): ttl_size_feat_MB=3.2435187874361873, ttl_size_scaling_MB=1.2721607377752662, ttl_size_offsets_MB=1.2397710722871125, ttl_size_MB=5.755450597498566-----
+2026-10-15 16:34:40,221 - INFO: 
+-----[ITER 29000] bits info (approx from visible): bit_per_feat_param=1.705035924911499, ttl_size_feat_MB_approx=5.249516169581625-----
+2026-10-15 16:34:40,221 - INFO: 
+-----[ITER 29000] bits info: anchor_num=516542-----
+2026-10-15 16:34:40,222 - INFO: 
+-----[ITER 29000] bits info: 1_rate_mask=0.6200541853904724, mask_numel=516542, mask_size_MB=0.05899443477392197-----
+2026-10-15 16:34:40,227 - INFO: 
+-----[ITER 29000] RENO anchor rate term: avg_bpp_per_anchor=19.6780 (raw=19.6298), anchor_count_soft=320284.0-----
+Training progress:  96%|█████████▋| 28900/30000 [3:04:47<08:59,  2.04it/s, Loss=nan]Training progress:  97%|█████████▋| 29000/30000 [3:04:47<08:15,  2.02it/s, Loss=nan]2026-10-15 16:34:40,454 - INFO: [RENO] iter=29000 bpp=19.7221 anchor_num=20000
+2026-10-15 16:34:55,966 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29029; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  97%|█████████▋| 29000/30000 [3:05:36<08:15,  2.02it/s, Loss=nan]Training progress:  97%|█████████▋| 29100/30000 [3:05:36<07:24,  2.02it/s, Loss=nan]2026-10-15 16:35:36,270 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29114; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  97%|█████████▋| 29100/30000 [3:06:25<07:24,  2.02it/s, Loss=nan]Training progress:  97%|█████████▋| 29200/30000 [3:06:25<06:34,  2.03it/s, Loss=nan]2026-10-15 16:36:18,692 - INFO: [RENO] iter=29200 bpp=19.6726 anchor_num=20000
+2026-10-15 16:36:41,821 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29246; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  97%|█████████▋| 29200/30000 [3:07:14<06:34,  2.03it/s, Loss=nan]Training progress:  98%|█████████▊| 29300/30000 [3:07:14<05:44,  2.03it/s, Loss=nan]2026-10-15 16:37:48,407 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29384; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  98%|█████████▊| 29300/30000 [3:08:03<05:44,  2.03it/s, Loss=nan]Training progress:  98%|█████████▊| 29400/30000 [3:08:03<04:54,  2.04it/s, Loss=nan]2026-10-15 16:37:56,558 - INFO: [RENO] iter=29400 bpp=19.7105 anchor_num=20000
+2026-10-15 16:38:32,994 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29475; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  98%|█████████▊| 29400/30000 [3:08:52<04:54,  2.04it/s, Loss=nan]Training progress:  98%|█████████▊| 29500/30000 [3:08:52<04:05,  2.04it/s, Loss=nan]2026-10-15 16:39:03,262 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29538; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  98%|█████████▊| 29500/30000 [3:09:40<04:05,  2.04it/s, Loss=nan]Training progress:  99%|█████████▊| 29600/30000 [3:09:40<03:15,  2.05it/s, Loss=nan]2026-10-15 16:39:33,676 - INFO: [RENO] iter=29600 bpp=19.6088 anchor_num=20000
+2026-10-15 16:39:46,903 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29629; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  99%|█████████▊| 29600/30000 [3:10:28<03:15,  2.05it/s, Loss=nan]Training progress:  99%|█████████▉| 29700/30000 [3:10:28<02:25,  2.06it/s, Loss=nan]2026-10-15 16:40:47,382 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29752; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  99%|█████████▉| 29700/30000 [3:11:17<02:25,  2.06it/s, Loss=nan]Training progress:  99%|█████████▉| 29800/30000 [3:11:17<01:37,  2.05it/s, Loss=nan]2026-10-15 16:41:10,762 - INFO: [RENO] iter=29800 bpp=19.6514 anchor_num=20000
+2026-10-15 16:41:43,864 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29869; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  99%|█████████▉| 29800/30000 [3:12:06<01:37,  2.05it/s, Loss=nan]Training progress: 100%|█████████▉| 29900/30000 [3:12:06<00:48,  2.06it/s, Loss=nan]2026-10-15 16:42:40,221 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 29984; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-15 16:42:48,929 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-15 16:42:48,929 - INFO: 
+-----[ITER 30000] bits info (accurate): ttl_size_feat_MB=3.2334254181478173, ttl_size_scaling_MB=1.2651656598318368, ttl_size_offsets_MB=1.2265244201989844, ttl_size_MB=5.7251154981786385-----
+2026-10-15 16:42:48,929 - INFO: 
+-----[ITER 30000] bits info (approx from visible): bit_per_feat_param=1.6975356340408325, ttl_size_feat_MB_approx=5.226424047224043-----
+2026-10-15 16:42:48,930 - INFO: 
+-----[ITER 30000] bits info: anchor_num=516542-----
+2026-10-15 16:42:48,930 - INFO: 
+-----[ITER 30000] bits info: 1_rate_mask=0.6164804100990295, mask_numel=516542, mask_size_MB=0.05914752185344696-----
+2026-10-15 16:42:48,935 - INFO: 
+-----[ITER 30000] RENO anchor rate term: avg_bpp_per_anchor=19.6728 (raw=19.6931), anchor_count_soft=318438.0-----
+Training progress: 100%|█████████▉| 29900/30000 [3:12:56<00:48,  2.06it/s, Loss=nan]Training progress: 100%|██████████| 30000/30000 [3:12:56<00:00,  2.04it/s, Loss=nan]Training progress: 100%|██████████| 30000/30000 [3:12:56<00:00,  2.59it/s, Loss=nan]
+[DEBUG LevelSEGate gate_yz] step=23000 per-level mean=['0.860', '0.874', '0.880', '0.885'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:45:04]
+[DEBUG Q_feat_adj] step=23000 no_cond: -0.0051/0.4981 cond: -0.1743/0.7826 Q_feat_if_cond: 0.8523 [15/10 15:45:04]
+[DEBUG Q_feat_prepass] step=24000 Q_feat_adj: -0.0767/0.2701 Q_feat: 0.9273 [15/10 15:53:27]
+[DEBUG LevelSEGate gate_xyz] step=24000 per-level mean=['0.861', '0.856', '0.850', '0.860', '0.837', '0.859', '0.861', '0.867', '0.865', '0.891', '0.860', '0.876'] std=['0.002', '0.002', '0.003', '0.002', '0.004', '0.002', '0.002', '0.002', '0.001', '0.002', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:53:27]
+[DEBUG LevelSEGate gate_xy] step=24000 per-level mean=['0.875', '0.876', '0.884', '0.888'] std=['0.001', '0.000', '0.000', '0.004'] (init was a uniform 0.881 for every level) [15/10 15:53:27]
+[DEBUG LevelSEGate gate_xz] step=24000 per-level mean=['0.863', '0.883', '0.889', '0.889'] std=['0.004', '0.001', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 15:53:27]
+[DEBUG LevelSEGate gate_yz] step=24000 per-level mean=['0.859', '0.874', '0.880', '0.886'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 15:53:27]
+[DEBUG Q_feat_adj] step=24000 no_cond: -0.0390/0.4178 cond: -0.2511/0.7193 Q_feat_if_cond: 0.7945 [15/10 15:53:27]
+[DEBUG Q_feat_prepass] step=25000 Q_feat_adj: -0.0605/0.2837 Q_feat: 0.9408 [15/10 16:01:46]
+[DEBUG LevelSEGate gate_xyz] step=25000 per-level mean=['0.862', '0.856', '0.850', '0.860', '0.838', '0.860', '0.861', '0.868', '0.866', '0.891', '0.860', '0.876'] std=['0.002', '0.002', '0.003', '0.002', '0.005', '0.002', '0.002', '0.002', '0.001', '0.002', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:01:46]
+[DEBUG LevelSEGate gate_xy] step=25000 per-level mean=['0.875', '0.876', '0.884', '0.888'] std=['0.001', '0.000', '0.000', '0.004'] (init was a uniform 0.881 for every level) [15/10 16:01:46]
+[DEBUG LevelSEGate gate_xz] step=25000 per-level mean=['0.864', '0.883', '0.889', '0.889'] std=['0.004', '0.001', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 16:01:46]
+[DEBUG LevelSEGate gate_yz] step=25000 per-level mean=['0.858', '0.873', '0.880', '0.886'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:01:46]
+[DEBUG Q_feat_adj] step=25000 no_cond: -0.0362/0.4210 cond: -0.2412/0.7167 Q_feat_if_cond: 0.7987 [15/10 16:01:46]
+[DEBUG Q_feat_prepass] step=26000 Q_feat_adj: -0.3143/0.2833 Q_feat: 0.7153 [15/10 16:10:03]
+[DEBUG LevelSEGate gate_xyz] step=26000 per-level mean=['0.863', '0.857', '0.852', '0.861', '0.840', '0.861', '0.862', '0.869', '0.867', '0.889', '0.861', '0.876'] std=['0.001', '0.002', '0.002', '0.001', '0.003', '0.001', '0.002', '0.001', '0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:10:03]
+[DEBUG LevelSEGate gate_xy] step=26000 per-level mean=['0.874', '0.876', '0.884', '0.888'] std=['0.001', '0.001', '0.000', '0.004'] (init was a uniform 0.881 for every level) [15/10 16:10:03]
+[DEBUG LevelSEGate gate_xz] step=26000 per-level mean=['0.868', '0.881', '0.885', '0.886'] std=['0.002', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [15/10 16:10:03]
+[DEBUG LevelSEGate gate_yz] step=26000 per-level mean=['0.858', '0.874', '0.880', '0.885'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:10:03]
+[DEBUG Q_feat_adj] step=26000 no_cond: -0.0234/0.4720 cond: -0.2241/0.7794 Q_feat_if_cond: 0.8226 [15/10 16:10:03]
+[DEBUG Q_feat_prepass] step=27000 Q_feat_adj: -0.1783/0.2467 Q_feat: 0.8341 [15/10 16:18:16]
+[DEBUG LevelSEGate gate_xyz] step=27000 per-level mean=['0.862', '0.857', '0.850', '0.861', '0.838', '0.860', '0.861', '0.868', '0.866', '0.890', '0.860', '0.876'] std=['0.002', '0.002', '0.004', '0.002', '0.005', '0.002', '0.002', '0.002', '0.001', '0.002', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:18:16]
+[DEBUG LevelSEGate gate_xy] step=27000 per-level mean=['0.875', '0.876', '0.884', '0.887'] std=['0.001', '0.001', '0.000', '0.004'] (init was a uniform 0.881 for every level) [15/10 16:18:16]
+[DEBUG LevelSEGate gate_xz] step=27000 per-level mean=['0.866', '0.882', '0.887', '0.887'] std=['0.003', '0.001', '0.003', '0.002'] (init was a uniform 0.881 for every level) [15/10 16:18:16]
+[DEBUG LevelSEGate gate_yz] step=27000 per-level mean=['0.858', '0.873', '0.880', '0.886'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:18:16]
+[DEBUG Q_feat_adj] step=27000 no_cond: -0.0574/0.4141 cond: -0.2623/0.7142 Q_feat_if_cond: 0.7857 [15/10 16:18:16]
+[DEBUG Q_feat_prepass] step=28000 Q_feat_adj: -0.1734/0.2622 Q_feat: 0.8406 [15/10 16:26:27]
+[DEBUG LevelSEGate gate_xyz] step=28000 per-level mean=['0.862', '0.857', '0.850', '0.860', '0.838', '0.860', '0.861', '0.868', '0.866', '0.891', '0.860', '0.876'] std=['0.002', '0.002', '0.003', '0.002', '0.004', '0.002', '0.002', '0.001', '0.001', '0.002', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:26:27]
+[DEBUG LevelSEGate gate_xy] step=28000 per-level mean=['0.875', '0.876', '0.884', '0.887'] std=['0.001', '0.001', '0.000', '0.004'] (init was a uniform 0.881 for every level) [15/10 16:26:27]
+[DEBUG LevelSEGate gate_xz] step=28000 per-level mean=['0.865', '0.882', '0.888', '0.888'] std=['0.004', '0.002', '0.003', '0.003'] (init was a uniform 0.881 for every level) [15/10 16:26:27]
+[DEBUG LevelSEGate gate_yz] step=28000 per-level mean=['0.857', '0.873', '0.880', '0.886'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:26:27]
+[DEBUG Q_feat_adj] step=28000 no_cond: -0.0620/0.4056 cond: -0.1772/0.7383 Q_feat_if_cond: 0.8524 [15/10 16:26:27]
+[DEBUG Q_feat_prepass] step=29000 Q_feat_adj: -0.2688/0.2575 Q_feat: 0.7523 [15/10 16:34:39]
+[DEBUG LevelSEGate gate_xyz] step=29000 per-level mean=['0.862', '0.857', '0.851', '0.861', '0.839', '0.860', '0.861', '0.868', '0.867', '0.890', '0.860', '0.876'] std=['0.002', '0.002', '0.003', '0.002', '0.004', '0.002', '0.002', '0.001', '0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:34:39]
+[DEBUG LevelSEGate gate_xy] step=29000 per-level mean=['0.874', '0.876', '0.884', '0.887'] std=['0.001', '0.001', '0.000', '0.004'] (init was a uniform 0.881 for every level) [15/10 16:34:39]
+[DEBUG LevelSEGate gate_xz] step=29000 per-level mean=['0.867', '0.881', '0.886', '0.886'] std=['0.003', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [15/10 16:34:39]
+[DEBUG LevelSEGate gate_yz] step=29000 per-level mean=['0.858', '0.873', '0.880', '0.885'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:34:39]
+[DEBUG Q_feat_adj] step=29000 no_cond: -0.0688/0.3933 cond: -0.2266/0.7093 Q_feat_if_cond: 0.8109 [15/10 16:34:39]
+[DEBUG Q_feat_prepass] step=30000 Q_feat_adj: -0.3115/0.2709 Q_feat: 0.7158 [15/10 16:42:47]
+[DEBUG LevelSEGate gate_xyz] step=30000 per-level mean=['0.862', '0.857', '0.851', '0.861', '0.839', '0.860', '0.861', '0.869', '0.867', '0.889', '0.860', '0.876'] std=['0.002', '0.002', '0.003', '0.002', '0.004', '0.001', '0.002', '0.001', '0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:42:47]
+[DEBUG LevelSEGate gate_xy] step=30000 per-level mean=['0.874', '0.876', '0.884', '0.888'] std=['0.001', '0.001', '0.000', '0.004'] (init was a uniform 0.881 for every level) [15/10 16:42:47]
+[DEBUG LevelSEGate gate_xz] step=30000 per-level mean=['0.868', '0.881', '0.885', '0.886'] std=['0.003', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [15/10 16:42:47]
+[DEBUG LevelSEGate gate_yz] step=30000 per-level mean=['0.857', '0.873', '0.880', '0.885'] std=['0.003', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [15/10 16:42:47]
+[DEBUG Q_feat_adj] step=30000 no_cond: -0.0706/0.4103 cond: -0.2393/0.7436 Q_feat_if_cond: 0.8094 [15/10 16:42:47]
+[DEBUG2 estimate_final_bits] hash_feats: -0.2854/0.5970 causal_ctx: -0.2817/0.5123 grid_scaling: 0.0056/0.0094 offsets_full: 0.0185/0.8823 hash_feats_cond: -0.0438/1.0168 feat_ctx_wso: -0.1637/1.3095 N_anchor=318438 [15/10 16:42:49]
+[DEBUG estimate_final_bits] mean: -0.0029/0.3028 scale: 0.1366/0.1989 prob: -0.0456/0.1430 Q_feat: 0.919971/0.336624 min=0.054856 max=1.987058 feat: -0.0310/1.5726 N=318438 [15/10 16:42:49]
+ninja: no work to do.
+2026-10-15 16:42:50,511 - INFO: 
+Estimated sizes in MB: anchor 0.5772, feat 3.2335, scaling 1.2633, offsets 1.2265, hash 0.1342, masks 0.2557, MLPs 1.4661, Total 8.1565
+2026-10-15 16:42:59,750 - INFO: 
+Encoded sizes in MB: anchor 0.5774, feat 3.2494, scaling 1.2644, offsets 1.2292, hash 0.1349, masks 0.2571, MLPs 1.4661, Total 8.1785, EncTime 9.2361
+Encoded time in s: anchor 0.4993, feat 5.0636, scaling 1.5113, offsets 1.4582, hash 0.0143, masks 0.0135, Total 9.2361
+2026-10-15 16:43:17,009 - INFO: 
+DecTime 17.2573
+Decoded time in s: anchor 0.5283, feat 8.9182, scaling 3.8836, offsets 3.2715, hash 0.0165, masks 0.0174, Total 17.2573
+2026-10-15 16:43:20,371 - INFO: 
+[ITER 30000] Evaluating test: L1 0.023867674292095246 PSNR 27.695216640349358 ssim 0.8671790072994847 lpips 0.22987300397888305
+2026-10-15 16:43:20,371 - INFO: Test FPS: 256.42511
+2026-10-15 16:43:20,939 - INFO: 
+[ITER 30000] Evaluating train: L1 0.022589774802327156 PSNR 28.68913803100586 ssim 0.9095889449119569 lpips 0.13973918557167053
+2026-10-15 16:43:20,940 - INFO: Test FPS: 90.72846
+2026-10-15 16:43:20,955 - INFO: 
+[ITER 30000] Saving Gaussians
+2026-10-15 16:43:23,499 - INFO: [RENO] iter=30000 bpp=19.5619 anchor_num=20000
+2026-10-15 16:43:23,500 - INFO: 
+ Total Training time: 11575.681805372238
+2026-10-15 16:43:23,503 - INFO: [RENO] Saved adapted weights to outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/bungeenerf/bilbao/lambda_0.005/reno_adapted.pt
+2026-10-15 16:43:23,506 - INFO: 
+Training complete.
+2026-10-15 16:43:23,507 - INFO: 
+Starting Rendering~
+4842024 27124586.0 10597203.0 10288832.0 1125340.25 2144789.0 [15/10 16:42:50]
+Start encoding ... [15/10 16:42:50]
+[RENO] compress_reno breakdown (s): setup=0.0002, fog=0.0167, prior=0.0563, fcg=0.0309, target=0.0650, pred_head=0.0243, cdf_prep=0.1215, torchac_enc=0.1450, pack_io=0.0007, total=0.4607 [15/10 16:42:50]
+[DEBUG2 conduct_encoding] hash_feats: -0.2854/0.5970 causal_ctx: -0.2817/0.5123 N_anchor=318438 [15/10 16:42:51]
+[DEBUG conduct_encoding] mean: -0.0029/0.3028 scale: 0.1366/0.1989 prob: -0.0456/0.1430 Q_feat: 0.919971/0.336624 min=0.054856 max=1.987058 feat: -0.0310/1.5726 N=15921900 [15/10 16:42:59]
+[DEBUG2 conduct_encoding] scaling_for_cond: 0.0056/0.0094 offsets_for_cond: 0.0185/0.8823 hash_feats_cond: -0.0438/1.0168 feat_context: -0.1637/1.3095 [15/10 16:42:59]
+encoding time: 9.236075401306152 [15/10 16:42:59]
+codec time: 7.993971109390259 [15/10 16:42:59]
+Start decoding ... [15/10 16:42:59]
+[RENO] decompress_reno breakdown (s): header_io=0.0003, prior=0.0566, fcg=0.0325, target=0.0653, pred_head=0.0247, cdf_prep=0.1163, torchac_dec=0.2179, total=0.5136 [15/10 16:43:00]
+decoding time: 17.257326364517212 [15/10 16:43:17]
+Start replacing parameters with decoded ones... [15/10 16:43:17]
+Parameters are successfully replaced by decoded ones! [15/10 16:43:17]
+hash_params: True 4 13 (18, 24, 33, 44, 59, 80, 108, 148, 201, 275, 376, 514) 15 (130, 258, 514, 1026) True False False plane_fusion= concat use_level_gate= True [15/10 16:43:23]
+encoding_param_num=1766674, size=0.21060395240783691MB. [15/10 16:43:23]
+Loading trained model at iteration 30000 [15/10 16:43:23]
+Reading camera 1/129Reading camera 2/129Reading camera 3/129Reading camera 4/129Reading camera 5/129Reading camera 6/129Reading camera 7/129Reading camera 8/129Reading camera 9/129Reading camera 10/129Reading camera 11/129Reading camera 12/129Reading camera 13/129Reading camera 14/129Reading camera 15/129Reading camera 16/129Reading camera 17/129Reading camera 18/129Reading camera 19/129Reading camera 20/129Reading camera 21/129Reading camera 22/129Reading camera 23/129Reading camera 24/129Reading camera 25/129Reading camera 26/129Reading camera 27/129Reading camera 28/129Reading camera 29/129Reading camera 30/129Reading camera 31/129Reading camera 32/129Reading camera 33/129Reading camera 34/129Reading camera 35/129Reading camera 36/129Reading camera 37/129Reading camera 38/129Reading camera 39/129Reading camera 40/129Reading camera 41/129Reading camera 42/129Reading camera 43/129Reading camera 44/129Reading camera 45/129Reading camera 46/129Reading camera 47/129Reading camera 48/129Reading camera 49/129Reading camera 50/129Reading camera 51/129Reading camera 52/129Reading camera 53/129Reading camera 54/129Reading camera 55/129Reading camera 56/129Reading camera 57/129Reading camera 58/129Reading camera 59/129Reading camera 60/129Reading camera 61/129Reading camera 62/129Reading camera 63/129Reading camera 64/129Reading camera 65/129Reading camera 66/129Reading camera 67/129Reading camera 68/129Reading camera 69/129Reading camera 70/129Reading camera 71/129Reading camera 72/129Reading camera 73/129Reading camera 74/129Reading camera 75/129Reading camera 76/129Reading camera 77/129Reading camera 78/129Reading camera 79/129Reading camera 80/129Reading camera 81/129Reading camera 82/129Reading camera 83/129Reading camera 84/129Reading camera 85/129Reading camera 86/129Reading camera 87/129Reading camera 88/129Reading camera 89/129Reading camera 90/129Reading camera 91/129Reading camera 92/129Reading camera 93/129Reading camera 94/129Reading camera 95/129Reading camera 96/129Reading camera 97/129Reading camera 98/129Reading camera 99/129Reading camera 100/129Reading camera 101/129Reading camera 102/129Reading camera 103/129Reading camera 104/129Reading camera 105/129Reading camera 106/129Reading camera 107/129Reading camera 108/129Reading camera 109/129Reading camera 110/129Reading camera 111/129Reading camera 112/129Reading camera 113/129Reading camera 114/129Reading camera 115/129Reading camera 116/129Reading camera 117/129Reading camera 118/129Reading camera 119/129Reading camera 120/129Reading camera 121/129Reading camera 122/129Reading camera 123/129Reading camera 124/129Reading camera 125/129Reading camera 126/129Reading camera 127/129Reading camera 128/129Reading camera 129/129 [15/10 16:43:23]
+using lod, using eval [15/10 16:43:23]
+test_cam_infos: 31 [15/10 16:43:23]
+start fetching data from ply file [15/10 16:43:23]
+Loading Training Cameras [15/10 16:43:23]
+Loading Test Cameras [15/10 16:43:28]
+Rendering progress:   0%|          | 0/31 [00:00<?, ?it/s]Rendering progress:   3%|▎         | 1/31 [00:01<00:45,  1.53s/it]Rendering progress:   6%|▋         | 2/31 [00:03<00:43,  1.52s/it]Rendering progress:  10%|▉         | 3/31 [00:04<00:42,  1.51s/it]Rendering progress:  13%|█▎        | 4/31 [00:06<00:40,  1.52s/it]Rendering progress:  16%|█▌        | 5/31 [00:07<00:39,  1.52s/it]Rendering progress:  19%|█▉        | 6/31 [00:09<00:38,  1.53s/it]Rendering progress:  23%|██▎       | 7/31 [00:10<00:37,  1.55s/it]Rendering progress:  26%|██▌       | 8/31 [00:12<00:35,  1.56s/it]Rendering progress:  29%|██▉       | 9/31 [00:13<00:34,  1.56s/it]Rendering progress:  32%|███▏      | 10/31 [00:15<00:32,  1.55s/it]Rendering progress:  35%|███▌      | 11/31 [00:16<00:30,  1.54s/it]Rendering progress:  39%|███▊      | 12/31 [00:18<00:29,  1.53s/it]Rendering progress:  42%|████▏     | 13/31 [00:19<00:27,  1.53s/it]Rendering progress:  45%|████▌     | 14/31 [00:21<00:26,  1.53s/it]Rendering progress:  48%|████▊     | 15/31 [00:23<00:24,  1.54s/it]Rendering progress:  52%|█████▏    | 16/31 [00:24<00:23,  1.54s/it]Rendering progress:  55%|█████▍    | 17/31 [00:26<00:21,  1.54s/it]Rendering progress:  58%|█████▊    | 18/31 [00:27<00:19,  1.53s/it]Rendering progress:  61%|██████▏   | 19/31 [00:29<00:18,  1.53s/it]Rendering progress:  65%|██████▍   | 20/31 [00:30<00:16,  1.53s/it]Rendering progress:  68%|██████▊   | 21/31 [00:32<00:15,  1.53s/it]Rendering progress:  71%|███████   | 22/31 [00:33<00:13,  1.54s/it]Rendering progress:  74%|███████▍  | 23/31 [00:35<00:12,  1.55s/it]Rendering progress:  77%|███████▋  | 24/31 [00:36<00:10,  1.54s/it]Rendering progress:  81%|████████  | 25/31 [00:38<00:09,  1.52s/it]Rendering progress:  84%|████████▍ | 26/31 [00:39<00:07,  1.52s/it]Rendering progress:  87%|████████▋ | 27/31 [00:41<00:06,  1.51s/it]Rendering progress:  90%|█████████ | 28/31 [00:42<00:04,  1.50s/it]Rendering progress:  94%|█████████▎| 29/31 [00:44<00:03,  1.51s/it]Rendering progress:  97%|█████████▋| 30/31 [00:45<00:01,  1.52s/it]Rendering progress: 100%|██████████| 31/31 [00:47<00:00,  1.52s/it]Rendering progress: 100%|██████████| 31/31 [00:47<00:00,  1.53s/it]
+2026-10-15 16:44:18,348 - INFO: Test FPS: [1;35m252.51680[0m
+2026-10-15 16:44:18,349 - INFO: 
+Rendering complete.
+2026-10-15 16:44:18,350 - INFO: 
+ Starting evaluation...
+testing_float_psnr=: tensor(27.6952, device='cuda:0', dtype=torch.float64) [15/10 16:44:18]
+ [15/10 16:44:18]
+Metric evaluation progress:   0%|          | 0/31 [00:00<?, ?it/s]Metric evaluation progress:   6%|▋         | 2/31 [00:00<00:01, 19.75it/s]Metric evaluation progress:  13%|█▎        | 4/31 [00:00<00:02, 12.88it/s]Metric evaluation progress:  19%|█▉        | 6/31 [00:00<00:02, 11.94it/s]Metric evaluation progress:  26%|██▌       | 8/31 [00:00<00:01, 11.53it/s]Metric evaluation progress:  32%|███▏      | 10/31 [00:00<00:01, 11.29it/s]Metric evaluation progress:  39%|███▊      | 12/31 [00:01<00:01, 11.17it/s]Metric evaluation progress:  45%|████▌     | 14/31 [00:01<00:01, 11.09it/s]Metric evaluation progress:  52%|█████▏    | 16/31 [00:01<00:01, 11.03it/s]Metric evaluation progress:  58%|█████▊    | 18/31 [00:01<00:01, 10.99it/s]Metric evaluation progress:  65%|██████▍   | 20/31 [00:01<00:01, 10.96it/s]Metric evaluation progress:  71%|███████   | 22/31 [00:01<00:00, 10.94it/s]Metric evaluation progress:  77%|███████▋  | 24/31 [00:02<00:00, 10.93it/s]Metric evaluation progress:  84%|████████▍ | 26/31 [00:02<00:00, 10.93it/s]Metric evaluation progress:  90%|█████████ | 28/31 [00:02<00:00, 10.92it/s]Metric evaluation progress:  97%|█████████▋| 30/31 [00:02<00:00, 10.91it/s]Metric evaluation progress: 100%|██████████| 31/31 [00:02<00:00, 11.20it/s]
+2026-10-15 16:44:23,582 - INFO: model_paths: [1;35moutputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/bungeenerf/bilbao/lambda_0.005[0m
+2026-10-15 16:44:23,670 - INFO:   SSIM : [1;35m   0.8666067[0m
+2026-10-15 16:44:23,671 - INFO:   PSNR : [1;35m  27.6878185[0m
+2026-10-15 16:44:23,671 - INFO:   LPIPS: [1;35m   0.2291265[0m
+2026-10-15 16:44:23,674 - INFO: 
+Evaluating complete.
+ [15/10 16:44:23]

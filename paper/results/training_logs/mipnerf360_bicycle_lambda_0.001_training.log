@@ -1,0 +1,953 @@
+/root/HAC-pluse_research/utils/encodings.py:205: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, inputs, embeddings, offsets_list, resolutions_list, calc_grad_inputs=False, min_level_id=None, n_levels_calc=1, binary_vxl=None, PV=0):
+/root/HAC-pluse_research/utils/encodings.py:283: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad):
+/opt/conda/envs/HAC_env_pytorch2/lib/python3.10/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/opt/conda/envs/HAC_env_pytorch2/lib/python3.10/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=VGG16_Weights.IMAGENET1K_V1`. You can also use `weights=VGG16_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+2026-10-16 08:42:48,478 - INFO: args: Namespace(sh_degree=3, feat_dim=50, n_offsets=10, voxel_size=0.001, update_depth=3, update_init_factor=16, update_hierachy_factor=4, use_feat_bank=False, use_hierarchical=False, level1_voxel_scale=4.0, level2_per_level1=64, intra_anchor_type='mlp', mamba_hidden_dim=256, mamba_d_state=16, mamba_d_conv=4, mamba_n_layers=2, source_path='data/mipnerf360/bicycle', model_path='outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/mipnerf360/bicycle/lambda_0.001', images='images', resolution=-1, white_background=False, data_device='cuda', eval=True, lod=0, iterations=30000, position_lr_init=0.0, position_lr_final=0.0, position_lr_delay_mult=0.01, position_lr_max_steps=30000, offset_lr_init=0.01, offset_lr_final=0.0001, offset_lr_delay_mult=0.01, offset_lr_max_steps=30000, mask_lr_init=0.01, mask_lr_final=0.0005, mask_lr_delay_mult=0.01, mask_lr_max_steps=30000, freeze_mask=False, feature_lr=0.0075, opacity_lr=0.02, scaling_lr=0.007, rotation_lr=0.002, mlp_opacity_lr_init=0.002, mlp_opacity_lr_final=2e-05, mlp_opacity_lr_delay_mult=0.01, mlp_opacity_lr_max_steps=30000, mlp_cov_lr_init=0.004, mlp_cov_lr_final=0.004, mlp_cov_lr_delay_mult=0.01, mlp_cov_lr_max_steps=30000, mlp_color_lr_init=0.008, mlp_color_lr_final=5e-05, mlp_color_lr_delay_mult=0.01, mlp_color_lr_max_steps=30000, mlp_featurebank_lr_init=0.01, mlp_featurebank_lr_final=1e-05, mlp_featurebank_lr_delay_mult=0.01, mlp_featurebank_lr_max_steps=30000, encoding_xyz_lr_init=0.005, encoding_xyz_lr_final=1e-05, encoding_xyz_lr_delay_mult=0.33, encoding_xyz_lr_max_steps=30000, mlp_grid_lr_init=0.005, mlp_grid_lr_final=1e-05, mlp_grid_lr_delay_mult=0.01, mlp_grid_lr_max_steps=30000, mlp_deform_lr_init=0.005, mlp_deform_lr_final=0.0005, mlp_deform_lr_delay_mult=0.01, mlp_deform_lr_max_steps=30000, causal_knn_lr_init=0.005, causal_knn_lr_final=1e-05, causal_knn_lr_delay_mult=0.01, causal_knn_lr_max_steps=30000, mlp_hyp_lr_init=0.005, mlp_hyp_lr_final=0.0005, mlp_hyp_lr_delay_mult=0.01, mlp_hyp_lr_max_steps=30000, percent_dense=0.01, lambda_dssim=0.2, start_stat=500, update_from=1500, update_interval=100, update_until=15000, min_opacity=0.005, success_threshold=0.8, densify_grad_threshold=0.0002, convert_SHs_python=False, compute_cov3D_python=False, debug=False, ip='127.0.0.1', port=6009, debug_from=-1, detect_anomaly=False, warmup=False, use_wandb=False, test_iterations=[30000], save_iterations=[30000, 30000], quiet=False, checkpoint_iterations=[], start_checkpoint=None, gpu='-1', log2=13, log2_2D=15, n_features=4, lmbda=0.001, plane_fusion='concat', use_level_gate=True, use_gated_mlp=False, use_spatial_context=False, use_joint_context=False, use_anchor_cond_norm=True, use_causal_knn=True, causal_knn_K=8, causal_knn_hidden_mult=2, mlp_grid_hidden_mult=4, use_3gmm=False, quantize_mlp_bits=0, quantize_mlp_fp16=False, quantize_mlp_fp8=False, quantize_mlp_fp4=False, fp8_variant='e4m3', prune_mlp_ratio=0.0, prune_finetune_iters=300, prune_finetune_lr=0.0001, prune_finetune_lambda_q=1000.0, seed=42, use_reno=True, reno_ckpt_path='/root/HAC-pluse_research/submodules/reno/model/Ford/ckpt.pt', train_reno=True, reno_train_interval=20, reno_lr=0.0001)
+2026-10-16 08:42:48,478 - INFO: Optimizing outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/mipnerf360/bicycle/lambda_0.001
+Warning: mamba-ssm not installed. Install with: pip install mamba-ssm
+Setting up [LPIPS] perceptual loss: trunk [vgg], v[0.1], spatial [off]
+Loading model from: /opt/conda/envs/HAC_env_pytorch2/lib/python3.10/site-packages/lpips/weights/v0.1/vgg.pth
+not found tf board
+Random seed set to: 42 [16/10 08:42:48]
+Output folder: outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/mipnerf360/bicycle/lambda_0.001 [16/10 08:42:48]
+Tensorboard not available: not logging progress [16/10 08:42:48]
+hash_params: True 4 13 (18, 24, 33, 44, 59, 80, 108, 148, 201, 275, 376, 514) 15 (130, 258, 514, 1026) True False False plane_fusion= concat use_level_gate= True [16/10 08:42:48]
+encoding_param_num=1766674, size=0.21060395240783691MB. [16/10 08:42:48]
+Reading camera 1/194Reading camera 2/194Reading camera 3/194Reading camera 4/194Reading camera 5/194Reading camera 6/194Reading camera 7/194Reading camera 8/194Reading camera 9/194Reading camera 10/194Reading camera 11/194Reading camera 12/194Reading camera 13/194Reading camera 14/194Reading camera 15/194Reading camera 16/194Reading camera 17/194Reading camera 18/194Reading camera 19/194Reading camera 20/194Reading camera 21/194Reading camera 22/194Reading camera 23/194Reading camera 24/194Reading camera 25/194Reading camera 26/194Reading camera 27/194Reading camera 28/194Reading camera 29/194Reading camera 30/194Reading camera 31/194Reading camera 32/194Reading camera 33/194Reading camera 34/194Reading camera 35/194Reading camera 36/194Reading camera 37/194Reading camera 38/194Reading camera 39/194Reading camera 40/194Reading camera 41/194Reading camera 42/194Reading camera 43/194Reading camera 44/194Reading camera 45/194Reading camera 46/194Reading camera 47/194Reading camera 48/194Reading camera 49/194Reading camera 50/194Reading camera 51/194Reading camera 52/194Reading camera 53/194Reading camera 54/194Reading camera 55/194Reading camera 56/194Reading camera 57/194Reading camera 58/194Reading camera 59/194Reading camera 60/194Reading camera 61/194Reading camera 62/194Reading camera 63/194Reading camera 64/194Reading camera 65/194Reading camera 66/194Reading camera 67/194Reading camera 68/194Reading camera 69/194Reading camera 70/194Reading camera 71/194Reading camera 72/194Reading camera 73/194Reading camera 74/194Reading camera 75/194Reading camera 76/194Reading camera 77/194Reading camera 78/194Reading camera 79/194Reading camera 80/194Reading camera 81/194Reading camera 82/194Reading camera 83/194Reading camera 84/194Reading camera 85/194Reading camera 86/194Reading camera 87/194Reading camera 88/194Reading camera 89/194Reading camera 90/194Reading camera 91/194Reading camera 92/194Reading camera 93/194Reading camera 94/194Reading camera 95/194Reading camera 96/194Reading camera 97/194Reading camera 98/194Reading camera 99/194Reading camera 100/194Reading camera 101/194Reading camera 102/194Reading camera 103/194Reading camera 104/194Reading camera 105/194Reading camera 106/194Reading camera 107/194Reading camera 108/194Reading camera 109/194Reading camera 110/194Reading camera 111/194Reading camera 112/194Reading camera 113/194Reading camera 114/194Reading camera 115/194Reading camera 116/194Reading camera 117/194Reading camera 118/194Reading camera 119/194Reading camera 120/194Reading camera 121/194Reading camera 122/194Reading camera 123/194Reading camera 124/194Reading camera 125/194Reading camera 126/194Reading camera 127/194Reading camera 128/194Reading camera 129/194Reading camera 130/194Reading camera 131/194Reading camera 132/194Reading camera 133/194Reading camera 134/194Reading camera 135/194Reading camera 136/194Reading camera 137/194Reading camera 138/194Reading camera 139/194Reading camera 140/194Reading camera 141/194Reading camera 142/194Reading camera 143/194Reading camera 144/194Reading camera 145/194Reading camera 146/194Reading camera 147/194Reading camera 148/194Reading camera 149/194Reading camera 150/194Reading camera 151/194Reading camera 152/194Reading camera 153/194Reading camera 154/194Reading camera 155/194Reading camera 156/194Reading camera 157/194Reading camera 158/194Reading camera 159/194Reading camera 160/194Reading camera 161/194Reading camera 162/194Reading camera 163/194Reading camera 164/194Reading camera 165/194Reading camera 166/194Reading camera 167/194Reading camera 168/194Reading camera 169/194Reading camera 170/194Reading camera 171/194Reading camera 172/194Reading camera 173/194Reading camera 174/194Reading camera 175/194Reading camera 176/194Reading camera 177/194Reading camera 178/194Reading camera 179/194Reading camera 180/194Reading camera 181/194Reading camera 182/194Reading camera 183/194Reading camera 184/194Reading camera 185/194Reading camera 186/194Reading camera 187/194Reading camera 188/194Reading camera 189/194Reading camera 190/194Reading camera 191/194Reading camera 192/194Reading camera 193/194Reading camera 194/1942026-10-16 08:43:28,555 - INFO: [RENO] Fine-tuning enabled: interval=20, lr=0.0001
+ [16/10 08:42:49]
+start fetching data from ply file [16/10 08:42:49]
+Loading Training Cameras [16/10 08:42:49]
+[ INFO ] Encountered quite large input images (>1.6K pixels width), rescaling to 1.6K.
+ If this is not desired, please explicitly specify '--resolution/-r' as 1 [16/10 08:42:49]
+Loading Test Cameras [16/10 08:43:23]
+Initial voxel_size: 0.001 [16/10 08:43:28]
+Number of points at initialisation :  53005 [16/10 08:43:28]
+anchor_bound_updated [16/10 08:43:28]
+Training progress:   0%|          | 0/30000 [00:00<?, ?it/s]Training progress:   0%|          | 0/30000 [00:05<?, ?it/s, Loss=0.2371145]Training progress:   0%|          | 100/30000 [00:05<26:52, 18.55it/s, Loss=0.2371145]Training progress:   0%|          | 100/30000 [00:10<26:52, 18.55it/s, Loss=0.2078539]Training progress:   1%|          | 200/30000 [00:10<25:05, 19.80it/s, Loss=0.2078539]2026-10-16 08:43:38,852 - INFO: [RENO] iter=200 bpp=24.5549 anchor_num=20000
+Training progress:   1%|          | 200/30000 [00:14<25:05, 19.80it/s, Loss=0.1784013]Training progress:   1%|          | 300/30000 [00:14<23:48, 20.79it/s, Loss=0.1784013]Training progress:   1%|          | 300/30000 [00:19<23:48, 20.79it/s, Loss=0.1653280]Training progress:   1%|▏         | 400/30000 [00:19<22:54, 21.54it/s, Loss=0.1653280]2026-10-16 08:43:47,767 - INFO: [RENO] iter=400 bpp=24.2214 anchor_num=20000
+Training progress:   1%|▏         | 400/30000 [00:23<22:54, 21.54it/s, Loss=0.1633532]Training progress:   2%|▏         | 500/30000 [00:23<22:24, 21.94it/s, Loss=0.1633532]Training progress:   2%|▏         | 500/30000 [00:27<22:24, 21.94it/s, Loss=0.1643890]Training progress:   2%|▏         | 600/30000 [00:27<22:03, 22.22it/s, Loss=0.1643890]2026-10-16 08:43:56,563 - INFO: [RENO] iter=600 bpp=24.0074 anchor_num=20000
+Training progress:   2%|▏         | 600/30000 [00:32<22:03, 22.22it/s, Loss=0.1615669]Training progress:   2%|▏         | 700/30000 [00:32<21:42, 22.49it/s, Loss=0.1615669]Training progress:   2%|▏         | 700/30000 [00:36<21:42, 22.49it/s, Loss=0.1602175]Training progress:   3%|▎         | 800/30000 [00:36<21:23, 22.74it/s, Loss=0.1602175]2026-10-16 08:44:05,198 - INFO: [RENO] iter=800 bpp=23.9653 anchor_num=20000
+Training progress:   3%|▎         | 800/30000 [00:40<21:23, 22.74it/s, Loss=0.1728681]Training progress:   3%|▎         | 900/30000 [00:40<21:07, 22.96it/s, Loss=0.1728681]Training progress:   3%|▎         | 900/30000 [00:44<21:07, 22.96it/s, Loss=0.1567941]Training progress:   3%|▎         | 1000/30000 [00:44<20:47, 23.25it/s, Loss=0.1567941]2026-10-16 08:44:13,633 - INFO: [RENO] iter=1000 bpp=23.8814 anchor_num=20000
+Training progress:   3%|▎         | 1000/30000 [00:49<20:47, 23.25it/s, Loss=0.1593679]Training progress:   4%|▎         | 1100/30000 [00:49<20:31, 23.46it/s, Loss=0.1593679]Training progress:   4%|▎         | 1100/30000 [00:53<20:31, 23.46it/s, Loss=0.1494665]Training progress:   4%|▍         | 1200/30000 [00:53<20:19, 23.61it/s, Loss=0.1494665]2026-10-16 08:44:21,979 - INFO: [RENO] iter=1200 bpp=23.8383 anchor_num=20000
+Training progress:   4%|▍         | 1200/30000 [00:57<20:19, 23.61it/s, Loss=0.1382302]Training progress:   4%|▍         | 1300/30000 [00:57<20:07, 23.76it/s, Loss=0.1382302]Training progress:   4%|▍         | 1300/30000 [01:01<20:07, 23.76it/s, Loss=0.1688359]Training progress:   5%|▍         | 1400/30000 [01:01<19:58, 23.86it/s, Loss=0.1688359]2026-10-16 08:44:30,274 - INFO: [RENO] iter=1400 bpp=23.8255 anchor_num=20000
+Training progress:   5%|▍         | 1400/30000 [01:05<19:58, 23.86it/s, Loss=0.1391658]Training progress:   5%|▌         | 1500/30000 [01:05<19:49, 23.97it/s, Loss=0.1391658]Training progress:   5%|▌         | 1500/30000 [01:09<19:49, 23.97it/s, Loss=0.1543230]Training progress:   5%|▌         | 1600/30000 [01:09<19:40, 24.05it/s, Loss=0.1543230]2026-10-16 08:44:38,603 - INFO: [RENO] iter=1600 bpp=24.0219 anchor_num=20000
+Training progress:   5%|▌         | 1600/30000 [01:13<19:40, 24.05it/s, Loss=0.1457037]Training progress:   6%|▌         | 1700/30000 [01:13<19:18, 24.43it/s, Loss=0.1457037]Training progress:   6%|▌         | 1700/30000 [01:17<19:18, 24.43it/s, Loss=0.1567961]Training progress:   6%|▌         | 1800/30000 [01:17<19:03, 24.66it/s, Loss=0.1567961]2026-10-16 08:44:46,515 - INFO: [RENO] iter=1800 bpp=23.2618 anchor_num=20000
+Training progress:   6%|▌         | 1800/30000 [01:21<19:03, 24.66it/s, Loss=0.1383337]Training progress:   6%|▋         | 1900/30000 [01:21<18:54, 24.77it/s, Loss=0.1383337]Training progress:   6%|▋         | 1900/30000 [01:25<18:54, 24.77it/s, Loss=0.1774541]Training progress:   7%|▋         | 2000/30000 [01:25<18:53, 24.70it/s, Loss=0.1774541]2026-10-16 08:44:54,638 - INFO: [RENO] iter=2000 bpp=22.9030 anchor_num=20000
+Training progress:   7%|▋         | 2000/30000 [01:30<18:53, 24.70it/s, Loss=0.1429969]Training progress:   7%|▋         | 2100/30000 [01:30<19:04, 24.39it/s, Loss=0.1429969]Training progress:   7%|▋         | 2100/30000 [01:34<19:04, 24.39it/s, Loss=0.1276170]Training progress:   7%|▋         | 2200/30000 [01:34<19:04, 24.30it/s, Loss=0.1276170]2026-10-16 08:45:03,001 - INFO: [RENO] iter=2200 bpp=22.5934 anchor_num=20000
+Training progress:   7%|▋         | 2200/30000 [01:38<19:04, 24.30it/s, Loss=0.1392763]Training progress:   8%|▊         | 2300/30000 [01:38<19:12, 24.04it/s, Loss=0.1392763]Training progress:   8%|▊         | 2300/30000 [01:42<19:12, 24.04it/s, Loss=0.1551664]Training progress:   8%|▊         | 2400/30000 [01:42<19:20, 23.78it/s, Loss=0.1551664]2026-10-16 08:45:11,638 - INFO: [RENO] iter=2400 bpp=24.3330 anchor_num=20000
+Training progress:   8%|▊         | 2400/30000 [01:47<19:20, 23.78it/s, Loss=0.1659905]Training progress:   8%|▊         | 2500/30000 [01:47<19:32, 23.45it/s, Loss=0.1659905]Training progress:   8%|▊         | 2500/30000 [01:51<19:32, 23.45it/s, Loss=0.1689116]Training progress:   9%|▊         | 2600/30000 [01:51<19:39, 23.23it/s, Loss=0.1689116]2026-10-16 08:45:20,414 - INFO: [RENO] iter=2600 bpp=23.6730 anchor_num=20000
+Training progress:   9%|▊         | 2600/30000 [01:56<19:39, 23.23it/s, Loss=0.1262728]Training progress:   9%|▉         | 2700/30000 [01:56<19:48, 22.97it/s, Loss=0.1262728]Training progress:   9%|▉         | 2700/30000 [02:00<19:48, 22.97it/s, Loss=0.1406740]Training progress:   9%|▉         | 2800/30000 [02:00<19:56, 22.74it/s, Loss=0.1406740]2026-10-16 08:45:29,472 - INFO: [RENO] iter=2800 bpp=23.1809 anchor_num=20000
+Training progress:   9%|▉         | 2800/30000 [02:05<19:56, 22.74it/s, Loss=0.1341654]Training progress:  10%|▉         | 2900/30000 [02:05<20:13, 22.32it/s, Loss=0.1341654]Training progress:  10%|▉         | 2900/30000 [02:09<20:13, 22.32it/s, Loss=0.1433275]Training progress:  10%|█         | 3000/30000 [02:09<20:16, 22.19it/s, Loss=0.1433275]2026-10-16 08:45:38,469 - INFO: [RENO] iter=3000 bpp=22.8404 anchor_num=20000
+Training progress:  10%|█         | 3000/30000 [02:14<20:16, 22.19it/s, Loss=0.1320706]Training progress:  10%|█         | 3100/30000 [02:14<20:09, 22.24it/s, Loss=0.1320706]Training progress:  10%|█         | 3100/30000 [02:18<20:09, 22.24it/s, Loss=0.1305016]Training progress:  11%|█         | 3200/30000 [02:18<20:00, 22.33it/s, Loss=0.1305016]2026-10-16 08:45:47,378 - INFO: [RENO] iter=3200 bpp=22.6551 anchor_num=20000
+Training progress:  11%|█         | 3200/30000 [02:23<20:00, 22.33it/s, Loss=0.1477532]Training progress:  11%|█         | 3300/30000 [02:23<19:54, 22.36it/s, Loss=0.1477532]Training progress:  11%|█         | 3300/30000 [02:27<19:54, 22.36it/s, Loss=0.1365711]Training progress:  11%|█▏        | 3400/30000 [02:27<19:53, 22.28it/s, Loss=0.1365711]2026-10-16 08:45:56,357 - INFO: [RENO] iter=3400 bpp=22.4296 anchor_num=20000
+Training progress:  11%|█▏        | 3400/30000 [02:32<19:53, 22.28it/s, Loss=0.1379754]Training progress:  12%|█▏        | 3500/30000 [02:32<19:52, 22.22it/s, Loss=0.1379754]Training progress:  12%|█▏        | 3500/30000 [02:36<19:52, 22.22it/s, Loss=0.1294418]Training progress:  12%|█▏        | 3600/30000 [02:36<19:45, 22.26it/s, Loss=0.1294418]2026-10-16 08:46:05,358 - INFO: [RENO] iter=3600 bpp=22.3783 anchor_num=20000
+Training progress:  12%|█▏        | 3600/30000 [02:41<19:45, 22.26it/s, Loss=0.1362171]Training progress:  12%|█▏        | 3700/30000 [02:41<19:45, 22.18it/s, Loss=0.1362171]Training progress:  12%|█▏        | 3700/30000 [02:45<19:45, 22.18it/s, Loss=0.1387109]Training progress:  13%|█▎        | 3800/30000 [02:45<19:48, 22.04it/s, Loss=0.1387109]2026-10-16 08:46:14,513 - INFO: [RENO] iter=3800 bpp=22.1752 anchor_num=20000
+Training progress:  13%|█▎        | 3800/30000 [02:50<19:48, 22.04it/s, Loss=0.1161737]Training progress:  13%|█▎        | 3900/30000 [02:50<19:42, 22.07it/s, Loss=0.1161737]Training progress:  13%|█▎        | 3900/30000 [02:55<19:42, 22.07it/s, Loss=0.1403390]Training progress:  13%|█▎        | 4000/30000 [02:55<19:45, 21.93it/s, Loss=0.1403390]2026-10-16 08:46:24,034 - INFO: [RENO] iter=4000 bpp=22.3768 anchor_num=20000
+Training progress:  13%|█▎        | 4000/30000 [02:59<19:45, 21.93it/s, Loss=0.1410943]Training progress:  14%|█▎        | 4100/30000 [02:59<20:10, 21.40it/s, Loss=0.1410943]Training progress:  14%|█▎        | 4100/30000 [03:04<20:10, 21.40it/s, Loss=0.1413955]Training progress:  14%|█▍        | 4200/30000 [03:04<20:20, 21.14it/s, Loss=0.1413955]2026-10-16 08:46:33,665 - INFO: [RENO] iter=4200 bpp=22.1227 anchor_num=20000
+Training progress:  14%|█▍        | 4200/30000 [03:09<20:20, 21.14it/s, Loss=0.1460628]Training progress:  14%|█▍        | 4300/30000 [03:09<20:29, 20.90it/s, Loss=0.1460628]Training progress:  14%|█▍        | 4300/30000 [03:14<20:29, 20.90it/s, Loss=0.1473195]Training progress:  15%|█▍        | 4400/30000 [03:14<20:40, 20.64it/s, Loss=0.1473195]2026-10-16 08:46:43,682 - INFO: [RENO] iter=4400 bpp=25.2527 anchor_num=20000
+Training progress:  15%|█▍        | 4400/30000 [03:19<20:40, 20.64it/s, Loss=0.1125350]Training progress:  15%|█▌        | 4500/30000 [03:19<21:01, 20.21it/s, Loss=0.1125350]Training progress:  15%|█▌        | 4500/30000 [03:24<21:01, 20.21it/s, Loss=0.1185031]Training progress:  15%|█▌        | 4600/30000 [03:24<20:59, 20.17it/s, Loss=0.1185031]2026-10-16 08:46:53,812 - INFO: [RENO] iter=4600 bpp=24.1223 anchor_num=20000
+Training progress:  15%|█▌        | 4600/30000 [03:30<20:59, 20.17it/s, Loss=0.1268369]Training progress:  16%|█▌        | 4700/30000 [03:30<21:14, 19.85it/s, Loss=0.1268369]Training progress:  16%|█▌        | 4700/30000 [03:35<21:14, 19.85it/s, Loss=0.1339102]Training progress:  16%|█▌        | 4800/30000 [03:35<21:13, 19.79it/s, Loss=0.1339102]2026-10-16 08:47:04,169 - INFO: [RENO] iter=4800 bpp=22.7310 anchor_num=20000
+Training progress:  16%|█▌        | 4800/30000 [03:40<21:13, 19.79it/s, Loss=0.1073677]Training progress:  16%|█▋        | 4900/30000 [03:40<21:25, 19.53it/s, Loss=0.1073677]Training progress:  16%|█▋        | 4900/30000 [03:45<21:25, 19.53it/s, Loss=0.1106304]Training progress:  17%|█▋        | 5000/30000 [03:45<21:31, 19.36it/s, Loss=0.1106304]2026-10-16 08:47:14,699 - INFO: [RENO] iter=5000 bpp=22.1853 anchor_num=20000
+Training progress:  17%|█▋        | 5000/30000 [03:51<21:31, 19.36it/s, Loss=0.1446615]Training progress:  17%|█▋        | 5100/30000 [03:51<21:38, 19.18it/s, Loss=0.1446615]Training progress:  17%|█▋        | 5100/30000 [03:56<21:38, 19.18it/s, Loss=0.1148198]Training progress:  17%|█▋        | 5200/30000 [03:56<21:37, 19.11it/s, Loss=0.1148198]2026-10-16 08:47:25,380 - INFO: [RENO] iter=5200 bpp=21.7559 anchor_num=20000
+Training progress:  17%|█▋        | 5200/30000 [04:01<21:37, 19.11it/s, Loss=0.1219628]Training progress:  18%|█▊        | 5300/30000 [04:01<21:51, 18.83it/s, Loss=0.1219628]Training progress:  18%|█▊        | 5300/30000 [04:07<21:51, 18.83it/s, Loss=0.1147040]Training progress:  18%|█▊        | 5400/30000 [04:07<21:53, 18.74it/s, Loss=0.1147040]2026-10-16 08:47:36,187 - INFO: [RENO] iter=5400 bpp=21.4891 anchor_num=20000
+Training progress:  18%|█▊        | 5400/30000 [04:12<21:53, 18.74it/s, Loss=0.1227308]Training progress:  18%|█▊        | 5500/30000 [04:12<21:58, 18.59it/s, Loss=0.1227308]Training progress:  18%|█▊        | 5500/30000 [04:18<21:58, 18.59it/s, Loss=0.1041866]Training progress:  19%|█▊        | 5600/30000 [04:18<22:06, 18.40it/s, Loss=0.1041866]2026-10-16 08:47:47,306 - INFO: [RENO] iter=5600 bpp=21.2761 anchor_num=20000
+Training progress:  19%|█▊        | 5600/30000 [04:23<22:06, 18.40it/s, Loss=0.1062247]Training progress:  19%|█▉        | 5700/30000 [04:23<22:12, 18.23it/s, Loss=0.1062247]Training progress:  19%|█▉        | 5700/30000 [04:29<22:12, 18.23it/s, Loss=0.1240826]Training progress:  19%|█▉        | 5800/30000 [04:29<22:05, 18.25it/s, Loss=0.1240826]2026-10-16 08:47:58,354 - INFO: [RENO] iter=5800 bpp=21.2351 anchor_num=20000
+Training progress:  19%|█▉        | 5800/30000 [04:34<22:05, 18.25it/s, Loss=0.1131842]Training progress:  20%|█▉        | 5900/30000 [04:34<22:11, 18.11it/s, Loss=0.1131842]Training progress:  20%|█▉        | 5900/30000 [04:40<22:11, 18.11it/s, Loss=0.1304158]Training progress:  20%|██        | 6000/30000 [04:40<22:09, 18.05it/s, Loss=0.1304158]2026-10-16 08:48:09,678 - INFO: [RENO] iter=6000 bpp=21.1768 anchor_num=20000
+Training progress:  20%|██        | 6000/30000 [04:46<22:09, 18.05it/s, Loss=0.1116966]Training progress:  20%|██        | 6100/30000 [04:46<22:32, 17.67it/s, Loss=0.1116966]Training progress:  20%|██        | 6100/30000 [04:52<22:32, 17.67it/s, Loss=0.1278254]Training progress:  21%|██        | 6200/30000 [04:52<22:32, 17.60it/s, Loss=0.1278254]2026-10-16 08:48:21,217 - INFO: [RENO] iter=6200 bpp=21.1596 anchor_num=20000
+Training progress:  21%|██        | 6200/30000 [04:57<22:32, 17.60it/s, Loss=0.1310424]Training progress:  21%|██        | 6300/30000 [04:57<22:29, 17.57it/s, Loss=0.1310424]Training progress:  21%|██        | 6300/30000 [05:03<22:29, 17.57it/s, Loss=0.1105697]Training progress:  21%|██▏       | 6400/30000 [05:03<22:25, 17.54it/s, Loss=0.1105697]2026-10-16 08:48:32,883 - INFO: [RENO] iter=6400 bpp=21.1672 anchor_num=20000
+Training progress:  21%|██▏       | 6400/30000 [05:09<22:25, 17.54it/s, Loss=0.1006676]Training progress:  22%|██▏       | 6500/30000 [05:09<22:48, 17.18it/s, Loss=0.1006676]Training progress:  22%|██▏       | 6500/30000 [05:15<22:48, 17.18it/s, Loss=0.1101335]Training progress:  22%|██▏       | 6600/30000 [05:15<22:38, 17.22it/s, Loss=0.1101335]2026-10-16 08:48:44,556 - INFO: [RENO] iter=6600 bpp=21.0809 anchor_num=20000
+Training progress:  22%|██▏       | 6600/30000 [05:21<22:38, 17.22it/s, Loss=0.1171178]Training progress:  22%|██▏       | 6700/30000 [05:21<22:37, 17.16it/s, Loss=0.1171178]Training progress:  22%|██▏       | 6700/30000 [05:27<22:37, 17.16it/s, Loss=0.1118157]Training progress:  23%|██▎       | 6800/30000 [05:27<22:39, 17.07it/s, Loss=0.1118157]2026-10-16 08:48:56,467 - INFO: [RENO] iter=6800 bpp=21.1990 anchor_num=20000
+Training progress:  23%|██▎       | 6800/30000 [05:33<22:39, 17.07it/s, Loss=0.1047791]Training progress:  23%|██▎       | 6900/30000 [05:33<22:47, 16.89it/s, Loss=0.1047791]Training progress:  23%|██▎       | 6900/30000 [05:39<22:47, 16.89it/s, Loss=0.1104811]Training progress:  23%|██▎       | 7000/30000 [05:39<22:42, 16.89it/s, Loss=0.1104811]2026-10-16 08:49:08,468 - INFO: [RENO] iter=7000 bpp=21.1410 anchor_num=20000
+Training progress:  23%|██▎       | 7000/30000 [05:45<22:42, 16.89it/s, Loss=0.1275493]Training progress:  24%|██▎       | 7100/30000 [05:45<22:52, 16.68it/s, Loss=0.1275493]Training progress:  24%|██▎       | 7100/30000 [05:51<22:52, 16.68it/s, Loss=0.1095913]Training progress:  24%|██▍       | 7200/30000 [05:51<22:51, 16.62it/s, Loss=0.1095913]2026-10-16 08:49:20,711 - INFO: [RENO] iter=7200 bpp=21.1546 anchor_num=20000
+Training progress:  24%|██▍       | 7200/30000 [05:57<22:51, 16.62it/s, Loss=0.1083188]Training progress:  24%|██▍       | 7300/30000 [05:57<22:55, 16.51it/s, Loss=0.1083188]Training progress:  24%|██▍       | 7300/30000 [06:03<22:55, 16.51it/s, Loss=0.1267972]Training progress:  25%|██▍       | 7400/30000 [06:03<22:51, 16.47it/s, Loss=0.1267972]2026-10-16 08:49:32,947 - INFO: [RENO] iter=7400 bpp=21.2008 anchor_num=20000
+Training progress:  25%|██▍       | 7400/30000 [06:10<22:51, 16.47it/s, Loss=0.1176575]Training progress:  25%|██▌       | 7500/30000 [06:10<23:02, 16.28it/s, Loss=0.1176575]Training progress:  25%|██▌       | 7500/30000 [06:16<23:02, 16.28it/s, Loss=0.1127932]Training progress:  25%|██▌       | 7600/30000 [06:16<22:56, 16.28it/s, Loss=0.1127932]2026-10-16 08:49:45,453 - INFO: [RENO] iter=7600 bpp=21.1535 anchor_num=20000
+Training progress:  25%|██▌       | 7600/30000 [06:22<22:56, 16.28it/s, Loss=0.1022138]Training progress:  26%|██▌       | 7700/30000 [06:22<23:05, 16.09it/s, Loss=0.1022138]Training progress:  26%|██▌       | 7700/30000 [06:28<23:05, 16.09it/s, Loss=0.0969910]Training progress:  26%|██▌       | 7800/30000 [06:28<23:01, 16.07it/s, Loss=0.0969910]2026-10-16 08:49:58,021 - INFO: [RENO] iter=7800 bpp=21.2953 anchor_num=20000
+Training progress:  26%|██▌       | 7800/30000 [06:35<23:01, 16.07it/s, Loss=0.0969806]Training progress:  26%|██▋       | 7900/30000 [06:35<23:02, 15.99it/s, Loss=0.0969806]Training progress:  26%|██▋       | 7900/30000 [06:41<23:02, 15.99it/s, Loss=0.0850601]Training progress:  27%|██▋       | 8000/30000 [06:41<22:58, 15.96it/s, Loss=0.0850601]2026-10-16 08:50:10,735 - INFO: [RENO] iter=8000 bpp=21.2908 anchor_num=20000
+Training progress:  27%|██▋       | 8000/30000 [06:47<22:58, 15.96it/s, Loss=0.0996287]Training progress:  27%|██▋       | 8100/30000 [06:47<23:02, 15.84it/s, Loss=0.0996287]Training progress:  27%|██▋       | 8100/30000 [06:54<23:02, 15.84it/s, Loss=0.1097286]Training progress:  27%|██▋       | 8200/30000 [06:54<23:03, 15.76it/s, Loss=0.1097286]2026-10-16 08:50:23,557 - INFO: [RENO] iter=8200 bpp=21.2978 anchor_num=20000
+Training progress:  27%|██▋       | 8200/30000 [07:00<23:03, 15.76it/s, Loss=0.0896515]Training progress:  28%|██▊       | 8300/30000 [07:00<23:04, 15.67it/s, Loss=0.0896515]Training progress:  28%|██▊       | 8300/30000 [07:07<23:04, 15.67it/s, Loss=0.1131270]Training progress:  28%|██▊       | 8400/30000 [07:07<22:58, 15.67it/s, Loss=0.1131270]2026-10-16 08:50:36,408 - INFO: [RENO] iter=8400 bpp=21.3179 anchor_num=20000
+Training progress:  28%|██▊       | 8400/30000 [07:13<22:58, 15.67it/s, Loss=0.1015585]Training progress:  28%|██▊       | 8500/30000 [07:13<23:01, 15.56it/s, Loss=0.1015585]Training progress:  28%|██▊       | 8500/30000 [07:20<23:01, 15.56it/s, Loss=0.1181448]Training progress:  29%|██▊       | 8600/30000 [07:20<23:00, 15.50it/s, Loss=0.1181448]2026-10-16 08:50:49,435 - INFO: [RENO] iter=8600 bpp=21.3279 anchor_num=20000
+Training progress:  29%|██▊       | 8600/30000 [07:26<23:00, 15.50it/s, Loss=0.1244353]Training progress:  29%|██▉       | 8700/30000 [07:26<23:00, 15.43it/s, Loss=0.1244353]Training progress:  29%|██▉       | 8700/30000 [07:33<23:00, 15.43it/s, Loss=0.1121084]Training progress:  29%|██▉       | 8800/30000 [07:33<22:55, 15.41it/s, Loss=0.1121084]2026-10-16 08:51:02,576 - INFO: [RENO] iter=8800 bpp=21.3095 anchor_num=20000
+Training progress:  29%|██▉       | 8800/30000 [07:40<22:55, 15.41it/s, Loss=0.0833716]Training progress:  30%|██▉       | 8900/30000 [07:40<23:03, 15.25it/s, Loss=0.0833716]Training progress:  30%|██▉       | 8900/30000 [07:46<23:03, 15.25it/s, Loss=0.1055894]Training progress:  30%|███       | 9000/30000 [07:46<23:04, 15.17it/s, Loss=0.1055894]2026-10-16 08:51:15,906 - INFO: [RENO] iter=9000 bpp=21.3724 anchor_num=20000
+Training progress:  30%|███       | 9000/30000 [07:53<23:04, 15.17it/s, Loss=0.1153324]Training progress:  30%|███       | 9100/30000 [07:53<23:04, 15.10it/s, Loss=0.1153324]Training progress:  30%|███       | 9100/30000 [08:00<23:04, 15.10it/s, Loss=0.1060867]Training progress:  31%|███       | 9200/30000 [08:00<23:00, 15.07it/s, Loss=0.1060867]2026-10-16 08:51:29,323 - INFO: [RENO] iter=9200 bpp=21.3298 anchor_num=20000
+Training progress:  31%|███       | 9200/30000 [08:06<23:00, 15.07it/s, Loss=0.0886625]Training progress:  31%|███       | 9300/30000 [08:06<23:05, 14.94it/s, Loss=0.0886625]Training progress:  31%|███       | 9300/30000 [08:13<23:05, 14.94it/s, Loss=0.1192374]Training progress:  31%|███▏      | 9400/30000 [08:13<23:00, 14.92it/s, Loss=0.1192374]2026-10-16 08:51:42,815 - INFO: [RENO] iter=9400 bpp=21.3771 anchor_num=20000
+Training progress:  31%|███▏      | 9400/30000 [08:20<23:00, 14.92it/s, Loss=0.1021604]Training progress:  32%|███▏      | 9500/30000 [08:20<23:00, 14.85it/s, Loss=0.1021604]Training progress:  32%|███▏      | 9500/30000 [08:27<23:00, 14.85it/s, Loss=0.0987757]Training progress:  32%|███▏      | 9600/30000 [08:27<22:59, 14.79it/s, Loss=0.0987757]2026-10-16 08:51:56,526 - INFO: [RENO] iter=9600 bpp=21.5015 anchor_num=20000
+Training progress:  32%|███▏      | 9600/30000 [08:34<22:59, 14.79it/s, Loss=0.0943778]Training progress:  32%|███▏      | 9700/30000 [08:34<23:01, 14.70it/s, Loss=0.0943778]Training progress:  32%|███▏      | 9700/30000 [08:40<23:01, 14.70it/s, Loss=0.1165961]Training progress:  33%|███▎      | 9800/30000 [08:40<22:55, 14.68it/s, Loss=0.1165961]2026-10-16 08:52:10,232 - INFO: [RENO] iter=9800 bpp=21.4280 anchor_num=20000
+Training progress:  33%|███▎      | 9800/30000 [08:47<22:55, 14.68it/s, Loss=0.1299916]Training progress:  33%|███▎      | 9900/30000 [08:47<22:52, 14.65it/s, Loss=0.1299916]Training progress:  33%|███▎      | 9900/30000 [08:54<22:52, 14.65it/s, Loss=0.0864905]Training progress:  33%|███▎      | 10000/30000 [08:54<22:53, 14.56it/s, Loss=0.0864905]2026-10-16 08:52:24,131 - INFO: [RENO] iter=10000 bpp=21.4683 anchor_num=20000
+Training progress:  33%|███▎      | 10000/30000 [09:10<22:53, 14.56it/s, Loss=0.0864905]Training progress:  33%|███▎      | 10000/30000 [10:02<22:53, 14.56it/s, Loss=0.1070969]Training progress:  34%|███▎      | 10100/30000 [10:02<1:23:44,  3.96it/s, Loss=0.1070969]2026-10-16 08:54:09,847 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10156; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:54:22,130 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10174; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:54:26,311 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10180; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  34%|███▎      | 10100/30000 [11:11<1:23:44,  3.96it/s, Loss=0.1137675]Training progress:  34%|███▍      | 10200/30000 [11:11<2:05:49,  2.62it/s, Loss=0.1137675]2026-10-16 08:54:40,364 - INFO: [RENO] iter=10200 bpp=21.5162 anchor_num=20000
+2026-10-16 08:55:26,293 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10268; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  34%|███▍      | 10200/30000 [12:19<2:05:49,  2.62it/s, Loss=0.0947998]Training progress:  34%|███▍      | 10300/30000 [12:19<2:34:38,  2.12it/s, Loss=0.0947998]Training progress:  34%|███▍      | 10300/30000 [13:27<2:34:38,  2.12it/s, Loss=0.1162630]Training progress:  35%|███▍      | 10400/30000 [13:27<2:54:29,  1.87it/s, Loss=0.1162630]2026-10-16 08:56:56,666 - INFO: [RENO] iter=10400 bpp=21.5557 anchor_num=20000
+2026-10-16 08:56:57,466 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10401; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:09,346 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10418; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:12,725 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10423; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:24,234 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10440; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:29,655 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10448; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:37,171 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10459; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:43,465 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10468; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:57,814 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10489; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:57:59,867 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10492; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  35%|███▍      | 10400/30000 [14:36<2:54:29,  1.87it/s, Loss=0.1068856]Training progress:  35%|███▌      | 10500/30000 [14:36<3:09:16,  1.72it/s, Loss=0.1068856]2026-10-16 08:58:10,912 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10507; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:58:17,144 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10516; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:59:11,593 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10595; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  35%|███▌      | 10500/30000 [15:46<3:09:16,  1.72it/s, Loss=0.0850491]Training progress:  35%|███▌      | 10600/30000 [15:46<3:19:26,  1.62it/s, Loss=0.0850491]2026-10-16 08:59:15,870 - INFO: [RENO] iter=10600 bpp=21.5269 anchor_num=20000
+2026-10-16 08:59:21,424 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10608; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+==== MASK-RELATED PARAMS ==== [16/10 08:43:29]
+_mask: shape=torch.Size([53005, 11, 1]), requires_grad=True [16/10 08:43:29]
+==== MASK GRAD DEBUG ==== [16/10 08:44:13]
+_mask: mean=0.7183, grad_none=False, grad_norm=9.4340e-04 [16/10 08:44:13]
+_mask sigmoid mean=0.6437, grad_none=False, grad_norm=9.4340e-04 [16/10 08:44:13]
+==== MASK GRAD DEBUG ==== [16/10 08:47:14]
+_mask: mean=0.5052, grad_none=False, grad_norm=2.9855e-04 [16/10 08:47:14]
+_mask sigmoid mean=0.5919, grad_none=False, grad_norm=2.9855e-04 [16/10 08:47:14]
+anchor_bound_updated [16/10 08:52:23]
+==== MASK GRAD DEBUG ==== [16/10 08:52:23]
+_mask: mean=0.5200, grad_none=False, grad_norm=7.0425e-05 [16/10 08:52:23]
+_mask sigmoid mean=0.5960, grad_none=False, grad_norm=7.0425e-05 [16/10 08:52:23]
+[renderer] WARNING: mean_adj has 30 NaN, 0 Inf  (step=10156) [16/10 08:54:09]
+[renderer] WARNING: scale_adj has 26 NaN, 4 Inf  (step=10156) [16/10 08:54:09]
+[EG_mix_prob_2] WARNING: mean2 has 30 NaN, 0 Inf values [16/10 08:54:09]
+[EG_mix_prob_2] WARNING: scale2 has 26 NaN, 4 Inf values [16/10 08:54:09]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [16/10 08:54:09]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [16/10 08:54:09]
+[renderer] WARNING: mean_adj has 15 NaN, 5 Inf  (step=10174) [16/10 08:54:21]
+[renderer] WARNING: scale_adj has 18 NaN, 2 Inf  (step=10174) [16/10 08:54:21]
+[EG_mix_prob_2] WARNING: mean2 has 15 NaN, 5 Inf values [16/10 08:54:21]
+[EG_mix_prob_2] WARNING: scale2 has 18 NaN, 2 Inf values [16/10 08:54:21]
+[EG_mix_prob_2] WARNING: probs1 has 23 NaN, 0 Inf values [16/10 08:54:21]
+[EG_mix_prob_2] WARNING: probs2 has 23 NaN, 0 Inf values [16/10 08:54:21]
+[renderer] WARNING: mean_adj has 10 NaN, 0 Inf  (step=10180) [16/10 08:54:26]
+[renderer] WARNING: scale_adj has 10 NaN, 0 Inf  (step=10180) [16/10 08:54:26]
+[EG_mix_prob_2] WARNING: mean2 has 10 NaN, 0 Inf values [16/10 08:54:26]
+[EG_mix_prob_2] WARNING: scale2 has 10 NaN, 0 Inf values [16/10 08:54:26]
+[EG_mix_prob_2] WARNING: probs1 has 11 NaN, 0 Inf values [16/10 08:54:26]
+[EG_mix_prob_2] WARNING: probs2 has 11 NaN, 0 Inf values [16/10 08:54:26]
+[renderer] WARNING: mean_adj has 19 NaN, 11 Inf  (step=10268) [16/10 08:55:26]
+[renderer] WARNING: scale_adj has 20 NaN, 10 Inf  (step=10268) [16/10 08:55:26]
+[EG_mix_prob_2] WARNING: mean2 has 19 NaN, 11 Inf values [16/10 08:55:26]
+[EG_mix_prob_2] WARNING: scale2 has 20 NaN, 10 Inf values [16/10 08:55:26]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [16/10 08:55:26]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [16/10 08:55:26]
+[renderer] WARNING: mean_adj has 32 NaN, 8 Inf  (step=10401) [16/10 08:56:57]
+[renderer] WARNING: scale_adj has 31 NaN, 9 Inf  (step=10401) [16/10 08:56:57]
+[EG_mix_prob_2] WARNING: mean2 has 32 NaN, 8 Inf values [16/10 08:56:57]
+[EG_mix_prob_2] WARNING: scale2 has 31 NaN, 9 Inf values [16/10 08:56:57]
+[EG_mix_prob_2] WARNING: probs1 has 39 NaN, 0 Inf values [16/10 08:56:57]
+[EG_mix_prob_2] WARNING: probs2 has 39 NaN, 0 Inf values [16/10 08:56:57]
+[renderer] WARNING: mean_adj has 30 NaN, 0 Inf  (step=10418) [16/10 08:57:09]
+[renderer] WARNING: scale_adj has 30 NaN, 0 Inf  (step=10418) [16/10 08:57:09]
+[EG_mix_prob_2] WARNING: mean2 has 30 NaN, 0 Inf values [16/10 08:57:09]
+[EG_mix_prob_2] WARNING: scale2 has 30 NaN, 0 Inf values [16/10 08:57:09]
+[EG_mix_prob_2] WARNING: probs1 has 34 NaN, 0 Inf values [16/10 08:57:09]
+[EG_mix_prob_2] WARNING: probs2 has 34 NaN, 0 Inf values [16/10 08:57:09]
+[renderer] WARNING: mean_adj has 28 NaN, 2 Inf  (step=10423) [16/10 08:57:12]
+[renderer] WARNING: scale_adj has 30 NaN, 0 Inf  (step=10423) [16/10 08:57:12]
+[EG_mix_prob_2] WARNING: mean2 has 28 NaN, 2 Inf values [16/10 08:57:12]
+[EG_mix_prob_2] WARNING: scale2 has 30 NaN, 0 Inf values [16/10 08:57:12]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [16/10 08:57:12]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [16/10 08:57:12]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10440) [16/10 08:57:24]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10440) [16/10 08:57:24]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 08:57:24]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 08:57:24]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 08:57:24]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 08:57:24]
+[renderer] WARNING: mean_adj has 30 NaN, 10 Inf  (step=10448) [16/10 08:57:29]
+[renderer] WARNING: scale_adj has 27 NaN, 13 Inf  (step=10448) [16/10 08:57:29]
+[EG_mix_prob_2] WARNING: mean2 has 30 NaN, 10 Inf values [16/10 08:57:29]
+[EG_mix_prob_2] WARNING: scale2 has 27 NaN, 13 Inf values [16/10 08:57:29]
+[EG_mix_prob_2] WARNING: probs1 has 39 NaN, 0 Inf values [16/10 08:57:29]
+[EG_mix_prob_2] WARNING: probs2 has 39 NaN, 0 Inf values [16/10 08:57:29]
+[renderer] WARNING: mean_adj has 0 NaN, 10 Inf  (step=10459) [16/10 08:57:36]
+[renderer] WARNING: scale_adj has 0 NaN, 10 Inf  (step=10459) [16/10 08:57:36]
+[EG_mix_prob_2] WARNING: mean2 has 0 NaN, 10 Inf values [16/10 08:57:36]
+[EG_mix_prob_2] WARNING: scale2 has 0 NaN, 10 Inf values [16/10 08:57:36]
+[EG_mix_prob_2] WARNING: probs1 has 11 NaN, 0 Inf values [16/10 08:57:36]
+[EG_mix_prob_2] WARNING: probs2 has 11 NaN, 0 Inf values [16/10 08:57:36]
+[renderer] WARNING: mean_adj has 40 NaN, 0 Inf  (step=10468) [16/10 08:57:43]
+[renderer] WARNING: scale_adj has 40 NaN, 0 Inf  (step=10468) [16/10 08:57:43]
+[EG_mix_prob_2] WARNING: mean2 has 40 NaN, 0 Inf values [16/10 08:57:43]
+[EG_mix_prob_2] WARNING: scale2 has 40 NaN, 0 Inf values [16/10 08:57:43]
+[EG_mix_prob_2] WARNING: probs1 has 42 NaN, 0 Inf values [16/10 08:57:43]
+[EG_mix_prob_2] WARNING: probs2 has 42 NaN, 0 Inf values [16/10 08:57:43]
+[renderer] WARNING: mean_adj has 16 NaN, 14 Inf  (step=10489) [16/10 08:57:57]
+[renderer] WARNING: scale_adj has 12 NaN, 18 Inf  (step=10489) [16/10 08:57:57]
+[EG_mix_prob_2] WARNING: mean2 has 16 NaN, 14 Inf values [16/10 08:57:57]
+[EG_mix_prob_2] WARNING: scale2 has 12 NaN, 18 Inf values [16/10 08:57:57]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [16/10 08:57:57]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [16/10 08:57:57]
+[renderer] WARNING: mean_adj has 16 NaN, 14 Inf  (step=10492) [16/10 08:57:59]
+[renderer] WARNING: scale_adj has 12 NaN, 18 Inf  (step=10492) [16/10 08:57:59]
+[EG_mix_prob_2] WARNING: mean2 has 16 NaN, 14 Inf values [16/10 08:57:59]
+[EG_mix_prob_2] WARNING: scale2 has 12 NaN, 18 Inf values [16/10 08:57:59]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [16/10 08:57:59]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [16/10 08:57:59]
+[EG_mix_prob_2] WARNING: probs1 has 1 NaN, 0 Inf values [16/10 08:58:10]
+[EG_mix_prob_2] WARNING: probs2 has 1 NaN, 0 Inf values [16/10 08:58:10]
+[EG_mix_prob_2] WARNING: probs1 has 1 NaN, 0 Inf values [16/10 08:58:16]
+[EG_mix_prob_2] WARNING: probs2 has 1 NaN, 0 Inf values [16/10 08:58:16]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10595) [16/10 08:59:11]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10595) [16/10 08:59:11]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 08:59:11]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 08:59:11]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 08:59:11]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 08:59:11]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10608) [16/10 08:59:21]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10608) [16/10 08:59:21]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 08:59:21]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 08:59:21]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 08:59:21]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 08:59:21]
+[renderer] WARNING: mean_adj has 44 NaN, 6 Inf  (step=10656) [16/10 08:59:54]
+[renderer] WARNING: scale_adj has 45 NaN, 5 Inf  (step=10656) [16/10 08:59:54]
+[EG_mix_prob_2] WARNING: mean2 has 44 NaN, 6 Inf values [16/10 08:59:54]
+[EG_mix_prob_2] WARNING: scale2 has 45 NaN, 5 Inf values [16/10 08:59:54]
+2026-10-16 08:59:54,534 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10656; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 08:59:57,360 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10660; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:00:05,859 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10672; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:00:08,620 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10676; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:00:09,336 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10677; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:00:19,018 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10691; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  35%|███▌      | 10600/30000 [16:56<3:19:26,  1.62it/s, Loss=0.0856943]Training progress:  36%|███▌      | 10700/30000 [16:56<3:26:47,  1.56it/s, Loss=0.0856943]2026-10-16 09:00:30,957 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10707; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:00:34,567 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10712; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:00:51,294 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10736; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:01:29,960 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10791; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  36%|███▌      | 10700/30000 [18:07<3:26:47,  1.56it/s, Loss=0.0755778]Training progress:  36%|███▌      | 10800/30000 [18:07<3:31:50,  1.51it/s, Loss=0.0755778]2026-10-16 09:01:36,913 - INFO: [RENO] iter=10800 bpp=21.5162 anchor_num=20000
+2026-10-16 09:02:08,088 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10844; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:02:08,753 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10845; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:02:21,564 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10863; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:02:29,831 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10875; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:02:41,158 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10891; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:02:44,636 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10896; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  36%|███▌      | 10800/30000 [19:18<3:31:50,  1.51it/s, Loss=0.1046325]Training progress:  36%|███▋      | 10900/30000 [19:18<3:35:38,  1.48it/s, Loss=0.1046325]2026-10-16 09:03:09,041 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10929; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:03:18,230 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10942; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 08:59:54]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 08:59:54]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10660) [16/10 08:59:57]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10660) [16/10 08:59:57]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 08:59:57]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 08:59:57]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 08:59:57]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 08:59:57]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10672) [16/10 09:00:05]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10672) [16/10 09:00:05]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:00:05]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:00:05]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:00:05]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:00:05]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10676) [16/10 09:00:08]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10676) [16/10 09:00:08]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:00:08]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:00:08]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:00:08]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:00:08]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10677) [16/10 09:00:09]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10677) [16/10 09:00:09]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:00:09]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:00:09]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:00:09]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:00:09]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10691) [16/10 09:00:18]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10691) [16/10 09:00:18]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:00:18]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:00:18]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:00:18]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:00:18]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10707) [16/10 09:00:30]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10707) [16/10 09:00:30]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:00:30]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:00:30]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:00:30]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:00:30]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10712) [16/10 09:00:34]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10712) [16/10 09:00:34]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:00:34]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:00:34]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:00:34]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:00:34]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10736) [16/10 09:00:51]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10736) [16/10 09:00:51]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:00:51]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:00:51]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:00:51]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:00:51]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10791) [16/10 09:01:29]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10791) [16/10 09:01:29]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:01:29]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:01:29]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:01:29]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:01:29]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10844) [16/10 09:02:07]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10844) [16/10 09:02:07]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:02:07]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:02:07]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:02:07]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:02:07]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10845) [16/10 09:02:08]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10845) [16/10 09:02:08]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:02:08]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:02:08]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:02:08]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:02:08]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10863) [16/10 09:02:21]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10863) [16/10 09:02:21]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:02:21]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:02:21]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:02:21]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:02:21]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10875) [16/10 09:02:29]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10875) [16/10 09:02:29]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:02:29]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:02:29]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:02:29]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:02:29]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10891) [16/10 09:02:40]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10891) [16/10 09:02:40]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:02:40]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:02:40]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:02:40]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:02:40]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10896) [16/10 09:02:44]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10896) [16/10 09:02:44]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:02:44]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:02:44]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:02:44]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:02:44]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10929) [16/10 09:03:08]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10929) [16/10 09:03:08]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:08]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:08]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:08]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:08]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10942) [16/10 09:03:18]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10942) [16/10 09:03:18]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:18]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:18]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:18]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:18]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10944) [16/10 09:03:19]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10944) [16/10 09:03:19]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:19]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:19]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values2026-10-16 09:03:19,645 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10944; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:03:22,996 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10949; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:03:23,676 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10950; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:03:25,023 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10952; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:03:27,912 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10956; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:03:37,074 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10969; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:03:39,859 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 10973; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:04:00,471 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 09:04:00,472 - INFO: 
+-----[ITER 11000] bits info (accurate): ttl_size_feat_MB=9.8995606508106, ttl_size_scaling_MB=3.098595829680562, ttl_size_offsets_MB=8.569442005828023, ttl_size_MB=21.567598486319184-----
+2026-10-16 09:04:00,472 - INFO: 
+-----[ITER 11000] bits info (approx from visible): bit_per_feat_param=2.548175573348999, ttl_size_feat_MB_approx=9.929919621784222-----
+2026-10-16 09:04:00,472 - INFO: 
+-----[ITER 11000] bits info: anchor_num=653787-----
+2026-10-16 09:04:00,472 - INFO: 
+-----[ITER 11000] bits info: 1_rate_mask=0.9989644885063171, mask_numel=653787, mask_size_MB=0.0009204099187627435-----
+2026-10-16 09:04:00,478 - INFO: 
+-----[ITER 11000] RENO anchor rate term: avg_bpp_per_anchor=21.4664 (raw=21.5483), anchor_count_soft=653110.0-----
+Training progress:  36%|███▋      | 10900/30000 [20:32<3:35:38,  1.48it/s, Loss=0.0865817]Training progress:  37%|███▋      | 11000/30000 [20:32<3:39:42,  1.44it/s, Loss=0.0865817]2026-10-16 09:04:01,418 - INFO: [RENO] iter=11000 bpp=21.5712 anchor_num=20000
+2026-10-16 09:04:29,065 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11039; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:04:34,197 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11046; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:04:39,233 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11053; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:04:46,357 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11063; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:04:51,330 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11070; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  37%|███▋      | 11000/30000 [21:44<3:39:42,  1.44it/s, Loss=0.1130365]Training progress:  37%|███▋      | 11100/30000 [21:44<3:41:03,  1.42it/s, Loss=0.1130365]/root/HAC-pluse_research/scene/gaussian_model.py:183: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /pytorch/aten/src/ATen/native/ReduceOps.cpp:1857.)
+  self._last_gate_std = gate.std(dim=0).detach()
+2026-10-16 09:05:27,729 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11120; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+2026-10-16 09:05:31,506 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11125; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  37%|███▋      | 11100/30000 [22:56<3:41:03,  1.42it/s, Loss=0.1194832]Training progress:  37%|███▋      | 11200/30000 [22:56<3:42:20,  1.41it/s, Loss=0.1194832]2026-10-16 09:06:26,371 - INFO: [RENO] iter=11200 bpp=21.5638 anchor_num=20000
+Training progress:  37%|███▋      | 11200/30000 [24:10<3:42:20,  1.41it/s, Loss=0.1010702]Training progress:  38%|███▊      | 11300/30000 [24:10<3:43:57,  1.39it/s, Loss=0.1010702]Training progress:  38%|███▊      | 11300/30000 [25:25<3:43:57,  1.39it/s, Loss=0.0939495]Training progress:  38%|███▊      | 11400/30000 [25:25<3:45:12,  1.38it/s, Loss=0.0939495]2026-10-16 09:08:54,740 - INFO: [RENO] iter=11400 bpp=21.5954 anchor_num=20000
+Training progress:  38%|███▊      | 11400/30000 [26:40<3:45:12,  1.38it/s, Loss=0.0741726]Training progress:  38%|███▊      | 11500/30000 [26:40<3:45:52,  1.37it/s, Loss=0.0741726]2026-10-16 09:10:38,387 - INFO: [WARNING] Non-finite gradient norm (nan) at iteration 11539; skipped optimizer step and zeroed 0 non-finite parameter entries to recover.
+Training progress:  38%|███▊      | 11500/30000 [27:54<3:45:52,  1.37it/s, Loss=0.0884944]Training progress:  39%|███▊      | 11600/30000 [27:54<3:46:11,  1.36it/s, Loss=0.0884944]2026-10-16 09:11:24,348 - INFO: [RENO] iter=11600 bpp=21.6393 anchor_num=20000
+Training progress:  39%|███▊      | 11600/30000 [29:10<3:46:11,  1.36it/s, Loss=0.1059308]Training progress:  39%|███▉      | 11700/30000 [29:10<3:46:11,  1.35it/s, Loss=0.1059308]Training progress:  39%|███▉      | 11700/30000 [30:26<3:46:11,  1.35it/s, Loss=0.1062786]Training progress:  39%|███▉      | 11800/30000 [30:26<3:46:42,  1.34it/s, Loss=0.1062786]2026-10-16 09:13:55,548 - INFO: [RENO] iter=11800 bpp=21.6357 anchor_num=20000
+Training progress:  39%|███▉      | 11800/30000 [31:42<3:46:42,  1.34it/s, Loss=0.0791008]Training progress:  40%|███▉      | 11900/30000 [31:42<3:46:48,  1.33it/s, Loss=0.0791008]2026-10-16 09:16:29,303 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 09:16:29,303 - INFO: 
+-----[ITER 12000] bits info (accurate): ttl_size_feat_MB=9.964840019121766, ttl_size_scaling_MB=3.2091941069811583, ttl_size_offsets_MB=8.016188370063901, ttl_size_MB=21.190222496166825-----
+2026-10-16 09:16:29,303 - INFO: 
+-----[ITER 12000] bits info (approx from visible): bit_per_feat_param=2.3788528442382812, ttl_size_feat_MB_approx=10.0112159478158-----
+2026-10-16 09:16:29,303 - INFO: 
+-----[ITER 12000] bits info: anchor_num=706056-----
+2026-10-16 09:16:29,304 - INFO: 
+-----[ITER 12000] bits info: 1_rate_mask=0.9968515038490295, mask_numel=706056, mask_size_MB=0.0025879978202283382-----
+2026-10-16 09:16:29,310 - INFO: 
+-----[ITER 12000] RENO anchor rate term: avg_bpp_per_anchor=21.5624 (raw=21.6294), anchor_count_soft=703833.0-----
+Training progress:  40%|███▉      | 11900/30000 [33:00<3:46:48,  1.33it/s, Loss=0.0817095]Training progress:  40%|████      | 12000/30000 [33:00<3:48:36,  1.31it/s, Loss=0.0817095]2026-10-16 09:16:30,407 - INFO: [RENO] iter=12000 bpp=21.6457 anchor_num=20000
+Training progress:  40%|████      | 12000/30000 [34:18<3:48:36,  1.31it/s, Loss=0.0879524]Training progress:  40%|████      | 12100/30000 [34:18<3:48:13,  1.31it/s, Loss=0.0879524]Training progress:  40%|████      | 12100/30000 [35:35<3:48:13,  1.31it/s, Loss=0.0807943]Training progress:  41%|████      | 12200/30000 [35:35<3:47:59,  1.30it/s, Loss=0.0807943]2026-10-16 09:19:05,224 - INFO: [RENO] iter=12200 bpp=21.6576 anchor_num=20000
+Training progress:  41%|████      | 12200/30000 [36:54<3:47:59,  1.30it/s, Loss=0.1037619]Training progress:  41%|████      | 12300/30000 [36:54<3:47:53,  1.29it/s, Loss=0.1037619]Training progress:  41%|████      | 12300/30000 [38:13<3:47:53,  1.29it/s, Loss=0.1104222]Training progress:  41%|████▏     | 12400/30000 [38:13<3:48:33,  1.28it/s, Loss=0.1104222]2026-10-16 09:21:42,979 - INFO: [RENO] iter=12400 bpp=21.7596 anchor_num=20000
+Training progress:  41%|████▏     | 12400/30000 [39:32<3:48:33,  1.28it/s, Loss=0.0907313]Training progress:  42%|████▏     | 12500/30000 [39:32<3:48:36,  1.28it/s, Loss=0.0907313]Training progress:  42%|████▏     | 12500/30000 [40:52<3:48:36,  1.28it/s, Loss=0.1061202]Training progress:  42%|████▏     | 12600/30000 [40:52<3:48:38,  1.27it/s, Loss=0.1061202]2026-10-16 09:24:22,264 - INFO: [RENO] iter=12600 bpp=21.7196 anchor_num=20000
+Training progress:  42%|████▏     | 12600/30000 [42:12<3:48:38,  1.27it/s, Loss=0.0833906]Training progress:  42%|████▏     | 12700/30000 [42:12<3:48:13,  1.26it/s, Loss=0.0833906]Training progress:  42%|████▏     | 12700/30000 [43:33<3:48:13,  1.26it/s, Loss=0.0807326]Training progress:  43%|████▎     | 12800/30000 [43:33<3:47:53,  1.26it/s, Loss=0.0807326]2026-10-16 09:27:02,532 - INFO: [RENO] iter=12800 bpp=21.7220 anchor_num=20000
+Training progress:  43%|████▎     | 12800/30000 [44:53<3:47:53,  1.26it/s, Loss=0.0979236]Training progress:  43%|████▎     | 12900/30000 [44:53<3:47:33,  1.25it/s, Loss=0.0979236] [16/10 09:03:19]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:19]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10949) [16/10 09:03:22]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10949) [16/10 09:03:22]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:22]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:22]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:22]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:22]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10950) [16/10 09:03:23]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10950) [16/10 09:03:23]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:23]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:23]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:23]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:23]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10952) [16/10 09:03:24]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10952) [16/10 09:03:24]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:24]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:24]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:24]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:24]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10956) [16/10 09:03:27]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10956) [16/10 09:03:27]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:27]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:27]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:27]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:27]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10969) [16/10 09:03:36]
+[renderer] WARNING: scale_adj has 49 NaN, 1 Inf  (step=10969) [16/10 09:03:36]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:36]
+[EG_mix_prob_2] WARNING: scale2 has 49 NaN, 1 Inf values [16/10 09:03:36]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:36]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:36]
+[renderer] WARNING: mean_adj has 50 NaN, 0 Inf  (step=10973) [16/10 09:03:39]
+[renderer] WARNING: scale_adj has 50 NaN, 0 Inf  (step=10973) [16/10 09:03:39]
+[EG_mix_prob_2] WARNING: mean2 has 50 NaN, 0 Inf values [16/10 09:03:39]
+[EG_mix_prob_2] WARNING: scale2 has 50 NaN, 0 Inf values [16/10 09:03:39]
+[EG_mix_prob_2] WARNING: probs1 has 50 NaN, 0 Inf values [16/10 09:03:39]
+[EG_mix_prob_2] WARNING: probs2 has 50 NaN, 0 Inf values [16/10 09:03:39]
+[DEBUG Q_feat_prepass] step=11000 Q_feat_adj: -0.8935/0.1405 Q_feat: 0.2939 [16/10 09:03:58]
+[DEBUG LevelSEGate gate_xyz] step=11000 per-level mean=['0.887', '0.889', '0.892', '0.890', '0.887', '0.889', '0.879', '0.886', '0.881', '0.879', '0.883', '0.875'] std=['0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000', '0.000', '0.000', '0.000', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:03:58]
+[DEBUG LevelSEGate gate_xy] step=11000 per-level mean=['0.884', '0.882', '0.882', '0.884'] std=['0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [16/10 09:03:58]
+[DEBUG LevelSEGate gate_xz] step=11000 per-level mean=['0.883', '0.883', '0.879', '0.879'] std=['0.000', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:03:58]
+[DEBUG LevelSEGate gate_yz] step=11000 per-level mean=['0.882', '0.886', '0.882', '0.882'] std=['0.001', '0.001', '0.000', '0.000'] (init was a uniform 0.881 for every level) [16/10 09:03:58]
+[DEBUG Q_feat_adj] step=11000 no_cond: -0.2931/0.5157 cond: -0.3843/8.6400 Q_feat_if_cond: 0.7390 [16/10 09:03:58]
+[renderer] WARNING: mean_adj has 37 NaN, 3 Inf  (step=11039) [16/10 09:04:28]
+[renderer] WARNING: scale_adj has 39 NaN, 1 Inf  (step=11039) [16/10 09:04:28]
+[EG_mix_prob_2] WARNING: mean2 has 37 NaN, 3 Inf values [16/10 09:04:28]
+[EG_mix_prob_2] WARNING: scale2 has 39 NaN, 1 Inf values [16/10 09:04:28]
+[EG_mix_prob_2] WARNING: probs1 has 39 NaN, 0 Inf values [16/10 09:04:28]
+[EG_mix_prob_2] WARNING: probs2 has 39 NaN, 0 Inf values [16/10 09:04:28]
+[renderer] WARNING: mean_adj has 28 NaN, 2 Inf  (step=11046) [16/10 09:04:33]
+[renderer] WARNING: scale_adj has 24 NaN, 6 Inf  (step=11046) [16/10 09:04:33]
+[EG_mix_prob_2] WARNING: mean2 has 28 NaN, 2 Inf values [16/10 09:04:33]
+[EG_mix_prob_2] WARNING: scale2 has 24 NaN, 6 Inf values [16/10 09:04:33]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [16/10 09:04:33]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [16/10 09:04:33]
+[renderer] WARNING: mean_adj has 26 NaN, 4 Inf  (step=11053) [16/10 09:04:39]
+[renderer] WARNING: scale_adj has 24 NaN, 6 Inf  (step=11053) [16/10 09:04:39]
+[EG_mix_prob_2] WARNING: mean2 has 26 NaN, 4 Inf values [16/10 09:04:39]
+[EG_mix_prob_2] WARNING: scale2 has 24 NaN, 6 Inf values [16/10 09:04:39]
+[EG_mix_prob_2] WARNING: probs1 has 28 NaN, 0 Inf values [16/10 09:04:39]
+[EG_mix_prob_2] WARNING: probs2 has 28 NaN, 0 Inf values [16/10 09:04:39]
+[renderer] WARNING: mean_adj has 28 NaN, 2 Inf  (step=11063) [16/10 09:04:46]
+[renderer] WARNING: scale_adj has 24 NaN, 6 Inf  (step=11063) [16/10 09:04:46]
+[EG_mix_prob_2] WARNING: mean2 has 28 NaN, 2 Inf values [16/10 09:04:46]
+[EG_mix_prob_2] WARNING: scale2 has 24 NaN, 6 Inf values [16/10 09:04:46]
+[EG_mix_prob_2] WARNING: probs1 has 30 NaN, 0 Inf values [16/10 09:04:46]
+[EG_mix_prob_2] WARNING: probs2 has 30 NaN, 0 Inf values [16/10 09:04:46]
+[EG_mix_prob_2] WARNING: probs1 has 6 NaN, 0 Inf values [16/10 09:04:51]
+[EG_mix_prob_2] WARNING: probs2 has 6 NaN, 0 Inf values [16/10 09:04:51]
+[renderer] WARNING: mean_adj has 0 NaN, 10 Inf  (step=11120) [16/10 09:05:27]
+[renderer] WARNING: scale_adj has 0 NaN, 10 Inf  (step=11120) [16/10 09:05:27]
+[EG_mix_prob_2] WARNING: mean2 has 0 NaN, 10 Inf values [16/10 09:05:27]
+[EG_mix_prob_2] WARNING: scale2 has 0 NaN, 10 Inf values [16/10 09:05:27]
+[EG_mix_prob_2] WARNING: probs1 has 10 NaN, 0 Inf values [16/10 09:05:27]
+[EG_mix_prob_2] WARNING: probs2 has 10 NaN, 0 Inf values [16/10 09:05:27]
+[renderer] WARNING: mean_adj has 15 NaN, 5 Inf  (step=11125) [16/10 09:05:31]
+[renderer] WARNING: scale_adj has 5 NaN, 15 Inf  (step=11125) [16/10 09:05:31]
+[EG_mix_prob_2] WARNING: mean2 has 15 NaN, 5 Inf values [16/10 09:05:31]
+[EG_mix_prob_2] WARNING: scale2 has 5 NaN, 15 Inf values [16/10 09:05:31]
+[EG_mix_prob_2] WARNING: probs1 has 19 NaN, 0 Inf values [16/10 09:05:31]
+[EG_mix_prob_2] WARNING: probs2 has 19 NaN, 0 Inf values [16/10 09:05:31]
+[EG_mix_prob_2] WARNING: probs1 has 1 NaN, 0 Inf values [16/10 09:10:38]
+[EG_mix_prob_2] WARNING: probs2 has 1 NaN, 0 Inf values [16/10 09:10:38]
+[DEBUG Q_feat_prepass] step=12000 Q_feat_adj: -0.8514/0.1833 Q_feat: 0.3201 [16/10 09:16:27]
+[DEBUG LevelSEGate gate_xyz] step=12000 per-level mean=['0.887', '0.888', '0.891', '0.889', '0.886', '0.888', '0.878', '0.885', '0.881', '0.878', '0.883', '0.876'] std=['0.000', '0.001', '0.001', '0.001', '0.000', '0.001', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [16/10 09:16:27]
+[DEBUG LevelSEGate gate_xy] step=12000 per-level mean=['0.883', '0.880', '0.868', '0.879'] std=['0.001', '0.000', '0.007', '0.004'] (init was a uniform 0.881 for every level) [16/10 09:16:27]
+[DEBUG LevelSEGate gate_xz] step=12000 per-level mean=['0.882', '0.883', '0.877', '0.879'] std=['0.000', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:16:27]
+[DEBUG LevelSEGate gate_yz] step=12000 per-level mean=['0.881', '0.885', '0.881', '0.881'] std=['0.001', '0.001', '0.000', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:16:27]
+[DEBUG Q_feat_adj] step=12000 no_cond: -0.2249/0.5779 cond: -0.2103/0.6097 Q_feat_if_cond: 0.8370 [16/10 09:16:27]
+[DEBUG Q_feat_prepass] step=13000 Q_feat_adj: -0.9868/0.1433 Q_feat: 0.2509 [16/10 09:29:43]
+2026-10-16 09:29:46,110 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 09:29:46,111 - INFO: 
+-----[ITER 13000] bits info (accurate): ttl_size_feat_MB=10.55161415785551, ttl_size_scaling_MB=3.368142986204475, ttl_size_offsets_MB=7.190353308804333, ttl_size_MB=21.11011045286432-----
+2026-10-16 09:29:46,111 - INFO: 
+-----[ITER 13000] bits info (approx from visible): bit_per_feat_param=2.371837615966797, ttl_size_feat_MB_approx=10.71220722740236-----
+2026-10-16 09:29:46,111 - INFO: 
+-----[ITER 13000] bits info: anchor_num=757729-----
+2026-10-16 09:29:46,111 - INFO: 
+-----[ITER 13000] bits info: 1_rate_mask=0.9926913380622864, mask_numel=757729, mask_size_MB=0.005637524649500847-----
+2026-10-16 09:29:46,117 - INFO: 
+-----[ITER 13000] RENO anchor rate term: avg_bpp_per_anchor=21.6464 (raw=21.7591), anchor_count_soft=752191.0-----
+Training progress:  43%|████▎     | 12900/30000 [46:17<3:47:33,  1.25it/s, Loss=0.0977603]Training progress:  43%|████▎     | 13000/30000 [46:17<3:49:48,  1.23it/s, Loss=0.0977603]2026-10-16 09:29:47,216 - INFO: [RENO] iter=13000 bpp=21.7472 anchor_num=20000
+Training progress:  43%|████▎     | 13000/30000 [47:39<3:49:48,  1.23it/s, Loss=0.1024943]Training progress:  44%|████▎     | 13100/30000 [47:39<3:49:05,  1.23it/s, Loss=0.1024943]Training progress:  44%|████▎     | 13100/30000 [49:01<3:49:05,  1.23it/s, Loss=0.0826704]Training progress:  44%|████▍     | 13200/30000 [49:01<3:48:04,  1.23it/s, Loss=0.0826704]2026-10-16 09:32:30,775 - INFO: [RENO] iter=13200 bpp=21.7963 anchor_num=20000
+Training progress:  44%|████▍     | 13200/30000 [50:23<3:48:04,  1.23it/s, Loss=0.0952011]Training progress:  44%|████▍     | 13300/30000 [50:23<3:46:58,  1.23it/s, Loss=0.0952011]Training progress:  44%|████▍     | 13300/30000 [51:45<3:46:58,  1.23it/s, Loss=0.0906517]Training progress:  45%|████▍     | 13400/30000 [51:45<3:46:17,  1.22it/s, Loss=0.0906517]2026-10-16 09:35:14,979 - INFO: [RENO] iter=13400 bpp=21.8120 anchor_num=20000
+Training progress:  45%|████▍     | 13400/30000 [53:07<3:46:17,  1.22it/s, Loss=0.0807124]Training progress:  45%|████▌     | 13500/30000 [53:07<3:45:12,  1.22it/s, Loss=0.0807124]Training progress:  45%|████▌     | 13500/30000 [54:30<3:45:12,  1.22it/s, Loss=0.0974434]Training progress:  45%|████▌     | 13600/30000 [54:30<3:44:35,  1.22it/s, Loss=0.0974434]2026-10-16 09:38:00,002 - INFO: [RENO] iter=13600 bpp=21.7497 anchor_num=20000
+Training progress:  45%|████▌     | 13600/30000 [55:53<3:44:35,  1.22it/s, Loss=0.0807794]Training progress:  46%|████▌     | 13700/30000 [55:53<3:44:03,  1.21it/s, Loss=0.0807794]Training progress:  46%|████▌     | 13700/30000 [57:18<3:44:03,  1.21it/s, Loss=0.0929272]Training progress:  46%|████▌     | 13800/30000 [57:18<3:44:42,  1.20it/s, Loss=0.0929272]2026-10-16 09:40:48,084 - INFO: [RENO] iter=13800 bpp=21.7852 anchor_num=20000
+Training progress:  46%|████▌     | 13800/30000 [58:43<3:44:42,  1.20it/s, Loss=0.0938868]Training progress:  46%|████▋     | 13900/30000 [58:43<3:44:43,  1.19it/s, Loss=0.0938868]2026-10-16 09:43:39,355 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 09:43:39,355 - INFO: 
+-----[ITER 14000] bits info (accurate): ttl_size_feat_MB=11.054362177848816, ttl_size_scaling_MB=3.4562225192785263, ttl_size_offsets_MB=6.442167862318456, ttl_size_MB=20.9527525594458-----
+2026-10-16 09:43:39,356 - INFO: 
+-----[ITER 14000] bits info (approx from visible): bit_per_feat_param=2.3626039028167725, ttl_size_feat_MB_approx=11.34067662008107-----
+2026-10-16 09:43:39,356 - INFO: 
+-----[ITER 14000] bits info: anchor_num=805319-----
+2026-10-16 09:43:39,356 - INFO: 
+-----[ITER 14000] bits info: 1_rate_mask=0.9807740449905396, mask_numel=805319, mask_size_MB=0.013162931427359581-----
+2026-10-16 09:43:39,362 - INFO: 
+-----[ITER 14000] RENO anchor rate term: avg_bpp_per_anchor=21.7182 (raw=21.8312), anchor_count_soft=789836.0-----
+Training progress:  46%|████▋     | 13900/30000 [1:00:11<3:44:43,  1.19it/s, Loss=0.0794306]Training progress:  47%|████▋     | 14000/30000 [1:00:11<3:46:17,  1.18it/s, Loss=0.0794306]2026-10-16 09:43:40,565 - INFO: [RENO] iter=14000 bpp=21.8153 anchor_num=20000
+Training progress:  47%|████▋     | 14000/30000 [1:01:36<3:46:17,  1.18it/s, Loss=0.0778206]Training progress:  47%|████▋     | 14100/30000 [1:01:36<3:45:18,  1.18it/s, Loss=0.0778206]Training progress:  47%|████▋     | 14100/30000 [1:03:02<3:45:18,  1.18it/s, Loss=0.0818339]Training progress:  47%|████▋     | 14200/30000 [1:03:02<3:44:32,  1.17it/s, Loss=0.0818339]2026-10-16 09:46:31,794 - INFO: [RENO] iter=14200 bpp=21.8299 anchor_num=20000
+Training progress:  47%|████▋     | 14200/30000 [1:04:28<3:44:32,  1.17it/s, Loss=0.1081249]Training progress:  48%|████▊     | 14300/30000 [1:04:28<3:43:32,  1.17it/s, Loss=0.1081249]Training progress:  48%|████▊     | 14300/30000 [1:05:55<3:43:32,  1.17it/s, Loss=0.0964373]Training progress:  48%|████▊     | 14400/30000 [1:05:55<3:43:47,  1.16it/s, Loss=0.0964373]2026-10-16 09:49:25,150 - INFO: [RENO] iter=14400 bpp=21.8748 anchor_num=20000
+Training progress:  48%|████▊     | 14400/30000 [1:07:21<3:43:47,  1.16it/s, Loss=0.0960051]Training progress:  48%|████▊     | 14500/30000 [1:07:21<3:42:03,  1.16it/s, Loss=0.0960051]Training progress:  48%|████▊     | 14500/30000 [1:08:47<3:42:03,  1.16it/s, Loss=0.0878153]Training progress:  49%|████▊     | 14600/30000 [1:08:47<3:40:58,  1.16it/s, Loss=0.0878153]2026-10-16 09:52:17,328 - INFO: [RENO] iter=14600 bpp=21.7553 anchor_num=20000
+Training progress:  49%|████▊     | 14600/30000 [1:10:14<3:40:58,  1.16it/s, Loss=0.1051503]Training progress:  49%|████▉     | 14700/30000 [1:10:14<3:40:23,  1.16it/s, Loss=0.1051503]Training progress:  49%|████▉     | 14700/30000 [1:11:42<3:40:23,  1.16it/s, Loss=0.1031495]Training progress:  49%|████▉     | 14800/30000 [1:11:42<3:39:45,  1.15it/s, Loss=0.1031495]2026-10-16 09:55:12,037 - INFO: [RENO] iter=14800 bpp=21.8429 anchor_num=20000
+Training progress:  49%|████▉     | 14800/30000 [1:13:10<3:39:45,  1.15it/s, Loss=0.0743907]Training progress:  50%|████▉     | 14900/30000 [1:13:10<3:38:59,  1.15it/s, Loss=0.0743907]2026-10-16 09:58:08,721 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 09:58:08,721 - INFO: 
+-----[ITER 15000] bits info (accurate): ttl_size_feat_MB=11.556278059259057, ttl_size_scaling_MB=3.557922901585698, ttl_size_offsets_MB=6.332053135149181, ttl_size_MB=21.446254095993936-----
+2026-10-16 09:58:08,721 - INFO: 
+-----[ITER 15000] bits info (approx from visible): bit_per_feat_param=2.369050979614258, ttl_size_feat_MB_approx=12.032652791504006-----
+2026-10-16 09:58:08,722 - INFO: 
+-----[ITER 15000] bits info: anchor_num=852132-----
+2026-10-16 09:58:08,722 - INFO: 
+-----[ITER 15000] bits info: 1_rate_mask=0.9608136415481567, mask_numel=852132, mask_size_MB=0.024236155673861504-----
+2026-10-16 09:58:08,728 - INFO: 
+-----[ITER 15000] RENO anchor rate term: avg_bpp_per_anchor=21.7629 (raw=21.7696), anchor_count_soft=818740.0-----
+Training progress:  50%|████▉     | 14900/30000 [1:14:40<3:38:59,  1.15it/s, Loss=0.0885829]Training progress:  50%|█████     | 15000/30000 [1:14:40<3:39:59,  1.14it/s, Loss=0.0885829]2026-10-16 09:58:09,135 - INFO: [RENO] iter=15000 bpp=21.7613 anchor_num=20000
+Training progress:  50%|█████     | 15000/30000 [1:16:06<3:39:59,  1.14it/s, Loss=0.0828879]Training progress:  50%|█████     | 15100/30000 [1:16:06<3:37:24,  1.14it/s, Loss=0.0828879]Training progress:  50%|█████     | 15100/30000 [1:17:33<3:37:24,  1.14it/s, Loss=0.0883725]Training progress:  51%|█████     | 15200/30000 [1:17:33<3:34:54,  1.15it/s, Loss=0.0883725]2026-10-16 10:01:01,677 - INFO: [RENO] iter=15200 bpp=21.7452 anchor_num=20000
+Training progress:  51%|█████     | 15200/30000 [1:18:59<3:34:54,  1.15it/s, Loss=0.0816784]Training progress:  51%|█████     | 15300/30000 [1:18:59<3:32:38,  1.15it/s, Loss=0.0816784]Training progress:  51%|█████     | 15300/30000 [1:20:24<3:32:38,  1.15it/s, Loss=0.0610338]Training progress:  51%|█████▏    | 15400/30000 [1:20:24<3:30:04,  1.16it/s, Loss=0.0610338]2026-10-16 10:03:52,961 - INFO: [RENO] iter=15400 bpp=21.6698 anchor_num=20000
+Training progress:  51%|█████▏    | 15400/30000 [1:21:49<3:30:04,  1.16it/s, Loss=0.0651508]Training progress:  52%|█████▏    | 15500/30000 [1:21:49<3:28:01,  1.16it/s, Loss=0.0651508]Training progress:  52%|█████▏    | 15500/30000 [1:23:15<3:28:01,  1.16it/s, Loss=0.0966889]Training progress:  52%|█████▏    | 15600/30000 [1:23:15<3:26:01,  1.16it/s, Loss=0.0966889]2026-10-16 10:06:43,751 - INFO: [RENO] iter=15600 bpp=21.7101 anchor_num=20000
+Training progress:  52%|█████▏    | 15600/30000 [1:24:40<3:26:01,  1.16it/s, Loss=0.0731554]Training progress:  52%|█████▏    | 15700/30000 [1:24:40<3:24:04,  1.17it/s, Loss=0.0731554]Training progress:  52%|█████▏    | 15700/30000 [1:26:05<3:24:04,  1.17it/s, Loss=0.0745386]Training progress:  53%|█████▎    | 15800/30000 [1:26:05<3:22:23,  1.17it/s, Loss=0.0745386]2026-10-16 10:09:34,127 - INFO: [RENO] iter=15800 bpp=21.5698 anchor_num=20000
+Training progress:  53%|█████▎    | 15800/30000 [1:27:31<3:22:23,  1.17it/s, Loss=0.0960388]Training progress:  53%|█████▎    | 15900/30000 [1:27:31<3:21:01,  1.17it/s, Loss=0.0960388]2026-10-16 10:12:26,922 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 10:12:26,922 - INFO: 
+-----[ITER 16000] bits info (accurate): ttl_size_feat_MB=11.382232081145048, ttl_size_scaling_MB=3.4888008553534746, ttl_size_offsets_MB=5.949475848115981, ttl_size_MB=20.820508784614503-----
+2026-10-16 10:12:26,923 - INFO: 
+-----[ITER 16000] bits info (approx from visible): bit_per_feat_param=2.397509813308716, ttl_size_feat_MB_approx=12.177198125328914-----
+2026-10-16 10:12:26,923 - INFO: 
+-----[ITER 16000] bits info: anchor_num=852132-----
+2026-10-16 10:12:26,923 - INFO: 
+-----[ITER 16000] bits info: 1_rate_mask=0.9318404197692871, mask_numel=852132, mask_size_MB=0.0364735871553421-----
+2026-10-16 10:12:26,929 - INFO: 
+-----[ITER 16000] RENO anchor rate term: avg_bpp_per_anchor=21.7164 (raw=21.6710), anchor_count_soft=794051.0-----
+Training progress:  53%|█████▎    | 15900/30000 [1:28:58<3:21:01,  1.17it/s, Loss=0.1008123]Training progress:  53%|█████▎    | 16000/30000 [1:28:58<3:20:58,  1.16it/s, Loss=0.1008123]2026-10-16 10:12:27,225 - INFO: [RENO] iter=16000 bpp=21.6165 anchor_num=20000
+Training progress:  53%|█████▎    | 16000/30000 [1:30:23<3:20:58,  1.16it/s, Loss=0.0869530]Training progress:  54%|█████▎    | 16100/30000 [1:30:23<3:18:31,  1.17it/s, Loss=0.0869530]Training progress:  54%|█████▎    | 16100/30000 [1:31:47<3:18:31,  1.17it/s, Loss=0.1028660]Training progress:  54%|█████▍    | 16200/30000 [1:31:47<3:16:00,  1.17it/s, Loss=0.1028660]2026-10-16 10:15:16,027 - INFO: [RENO] iter=16200 bpp=21.5569 anchor_num=20000
+Training progress:  54%|█████▍    | 16200/30000 [1:33:11<3:16:00,  1.17it/s, Loss=0.0862217]Training progress:  54%|█████▍    | 16300/30000 [1:33:11<3:14:03,  1.18it/s, Loss=0.0862217]Training progress:  54%|█████▍    | 16300/30000 [1:34:35<3:14:03,  1.18it/s, Loss=0.0886499]Training progress:  55%|█████▍    | 16400/30000 [1:34:35<3:11:45,  1.18it/s, Loss=0.0886499]2026-10-16 10:18:04,169 - INFO: [RENO] iter=16400 bpp=21.5167 anchor_num=20000
+Training progress:  55%|█████▍    | 16400/30000 [1:35:59<3:11:45,  1.18it/s, Loss=0.0767621]Training progress:  55%|█████▌    | 16500/30000 [1:35:59<3:10:08,  1.18it/s, Loss=0.0767621]Training progress:  55%|█████▌    | 16500/30000 [1:37:24<3:10:08,  1.18it/s, Loss=0.0839887]Training progress:  55%|█████▌    | 16600/30000 [1:37:24<3:08:45,  1.18it/s, Loss=0.0839887]2026-10-16 10:20:53,019 - INFO: [RENO] iter=16600 bpp=21.5803 anchor_num=20000
+Training progress:  55%|█████▌    | 16600/30000 [1:38:47<3:08:45,  1.18it/s, Loss=0.0741012]Training progress:  56%|█████▌    | 16700/30000 [1:38:47<3:06:34,  1.19it/s, Loss=0.0741012]Training progress:  56%|█████▌    | 16700/30000 [1:40:10<3:06:34,  1.19it/s, Loss=0.0680395]Training progress:  56%|█████▌    | 16800/30000 [1:40:10<3:03:59,  1.20it/s, Loss=0.0680395]2026-10-16 10:23:38,740 - INFO: [RENO] iter=16800 bpp=21.5217 anchor_num=20000
+Training progress:  56%|█████▌    | 16800/30000 [1:41:33<3:03:59,  1.20it/s, Loss=0.0692646]Training progress:  56%|█████▋    | 16900/30000 [1:41:33<3:02:25,  1.20it/s, Loss=0.0692646]2026-10-16 10:26:27,447 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 10:26:27,448 - INFO: 
+-----[ITER 17000] bits info (accurate): ttl_size_feat_MB=11.383573766797781, ttl_size_scaling_MB=3.43205618718639, ttl_size_offsets_MB=5.683961410075426, ttl_size_MB=20.499591364059597-----
+2026-10-16 10:26:27,448 - INFO: 
+-----[ITER 17000] bits info (approx from visible): bit_per_feat_param=2.46744966506958, ttl_size_feat_MB_approx=12.532429802388378-----
+2026-10-16 10:26:27,448 - INFO: 
+-----[ITER 17000] bits info: anchor_num=852132-----
+2026-10-16 10:26:27,449 - INFO: 
+-----[ITER 17000] bits info: 1_rate_mask=0.9087993502616882, mask_numel=852132, mask_size_MB=0.04474713280797005-----
+2026-10-16 10:26:27,455 - INFO: 
+-----[ITER 17000] RENO anchor rate term: avg_bpp_per_anchor=21.5917 (raw=21.5021), anchor_count_soft=774417.0-----
+Training progress:  56%|█████▋    | 16900/30000 [1:42:59<3:02:25,  1.20it/s, Loss=0.0811388]Training progress:  57%|█████▋    | 17000/30000 [1:42:59<3:02:24,  1.19it/s, Loss=0.0811388]2026-10-16 10:26:27,804 - INFO: [RENO] iter=17000 bpp=21.5476 anchor_num=20000
+Training progress:  57%|█████▋    | 17000/30000 [1:44:22<3:02:24,  1.19it/s, Loss=0.0990088]Training progress:  57%|█████▋    | 17100/30000 [1:44:22<3:00:32,  1.19it/s, Loss=0.0990088]Training progress:  57%|█████▋    | 17100/30000 [1:45:45<3:00:32,  1.19it/s, Loss=0.0730534]Training progress:  57%|█████▋    | 17200/30000 [1:45:45<2:58:43,  1.19it/s, Loss=0.0730534]2026-10-16 10:29:14,593 - INFO: [RENO] iter=17200 bpp=21.4702 anchor_num=20000
+Training progress:  57%|█████▋    | 17200/30000 [1:47:09<2:58:43,  1.19it/s, Loss=0.0859557]Training progress:  58%|█████▊    | 17300/30000 [1:47:09<2:56:58,  1.20it/s, Loss=0.0859557]Training progress:  58%|█████▊    | 17300/30000 [1:48:31<2:56:58,  1.20it/s, Loss=0.0817809]Training progress:  58%|█████▊    | 17400/30000 [1:48:31<2:54:55,  1.20it/s, Loss=0.0817809]2026-10-16 10:32:00,369 - INFO: [RENO] iter=17400 bpp=21.3932 anchor_num=20000
+Training progress:  58%|█████▊    | 17400/30000 [1:49:53<2:54:55,  1.20it/s, Loss=0.0793751]Training progress:  58%|█████▊    | 17500/30000 [1:49:53<2:52:48,  1.21it/s, Loss=0.0793751]Training progress:  58%|█████▊    | 17500/30000 [1:51:16<2:52:48,  1.21it/s, Loss=0.0617792]Training progress:  59%|█████▊    | 17600/30000 [1:51:16<2:51:18,  1.21it/s, Loss=0.0617792]2026-10-16 10:34:45,255 - INFO: [RENO] iter=17600 bpp=21.3764 anchor_num=20000
+Training progress:  59%|█████▊    | 17600/30000 [1:52:39<2:51:18,  1.21it/s, Loss=0.1028770]Training progress:  59%|█████▉    | 17700/30000 [1:52:39<2:49:57,  1.21it/s, Loss=0.1028770]Training progress:  59%|█████▉    | 17700/30000 [1:54:00<2:49:57,  1.21it/s, Loss=0.0637410]Training progress:  59%|█████▉    | 17800/30000 [1:54:00<2:47:37,  1.21it/s, Loss=0.0637410]2026-10-16 10:37:29,550 - INFO: [RENO] iter=17800 bpp=21.4628 anchor_num=20000
+Training progress:  59%|█████▉    | 17800/30000 [1:55:22<2:47:37,  1.21it/s, Loss=0.0656306]Training progress:  60%|█████▉    | 17900/30000 [1:55:22<2:45:58,  1.22it/s, Loss=0.0656306]2026-10-16 10:40:15,619 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 10:40:15,619 - INFO: 
+-----[ITER 18000] bits info (accurate): ttl_size_feat_MB=11.321416076272726, ttl_size_scaling_MB=3.4068469163030386, ttl_size_offsets_MB=5.486697092652321, ttl_size_MB=20.214960085228086-----
+2026-10-16 10:40:15,619 - INFO: 
+-----[ITER 18000] bits info (approx from visible): bit_per_feat_param=2.4994421005249023, ttl_size_feat_MB_approx=12.69492266180805-----
+2026-10-16 10:40:15,619 - INFO: 
+-----[ITER 18000] bits info: anchor_num=852132-----
+2026-10-16 10:40:15,620 - INFO: 
+-----[ITER 18000] bits info: 1_rate_mask=0.8928593397140503, mask_numel=852132, mask_size_MB=0.04990403354167938-----
+2026-10-16 10:40:15,626 - INFO: 
+-----[ITER 18000] RENO anchor rate term: avg_bpp_per_anchor=21.4819 (raw=21.3501), anchor_count_soft=760834.0-----
+Training progress:  60%|█████▉    | 17900/30000 [1:56:47<2:45:58,  1.22it/s, Loss=0.0866813]Training progress:  60%|██████    | 18000/30000 [1:56:47<2:45:53,  1.21it/s, Loss=0.0866813]2026-10-16 10:40:15,969 - INFO: [RENO] iter=18000 bpp=21.3633 anchor_num=20000
+Training progress:  60%|██████    | 18000/30000 [1:58:08<2:45:53,  1.21it/s, Loss=0.0719715]Training progress:  60%|██████    | 18100/30000 [1:58:08<2:43:40,  1.21it/s, Loss=0.0719715]Training progress:  60%|██████    | 18100/30000 [1:59:30<2:43:40,  1.21it/s, Loss=0.0639089]Training progress:  61%|██████    | 18200/30000 [1:59:30<2:41:31,  1.22it/s, Loss=0.0639089]2026-10-16 10:42:58,731 - INFO: [RENO] iter=18200 bpp=21.3441 anchor_num=20000
+Training progress:  61%|██████    | 18200/30000 [2:00:52<2:41:31,  1.22it/s, Loss=0.0867687]Training progress:  61%|██████    | 18300/30000 [2:00:52<2:40:04,  1.22it/s, Loss=0.0867687]Training progress:  61%|██████    | 18300/30000 [2:02:13<2:40:04,  1.22it/s, Loss=0.0707036]Training progress:  61%|██████▏   | 18400/30000 [2:02:13<2:38:16,  1.22it/s, Loss=0.0707036]2026-10-16 10:45:42,056 - INFO: [RENO] iter=18400 bpp=21.3765 anchor_num=20000
+Training progress:  61%|██████▏   | 18400/30000 [2:03:33<2:38:16,  1.22it/s, Loss=0.0817946]Training progress:  62%|██████▏   | 18500/30000 [2:03:33<2:36:04,  1.23it/s, Loss=0.0817946]Training progress:  62%|██████▏   | 18500/30000 [2:04:54<2:36:04,  1.23it/s, Loss=0.0651726]Training progress:  62%|██████▏   | 18600/30000 [2:04:54<2:34:28,  1.23it/s, Loss=0.0651726]2026-10-16 10:48:23,501 - INFO: [RENO] iter=18600 bpp=21.3555 anchor_num=20000
+Training progress:  62%|██████▏   | 18600/30000 [2:06:16<2:34:28,  1.23it/s, Loss=0.0864374]Training progress:  62%|██████▏   | 18700/30000 [2:06:16<2:33:07,  1.23it/s, Loss=0.0864374]Training progress:  62%|██████▏   | 18700/30000 [2:07:37<2:33:07,  1.23it/s, Loss=0.0776221]Training progress:  63%|██████▎   | 18800/30000 [2:07:37<2:31:38,  1.23it/s, Loss=0.0776221]2026-10-16 10:51:05,893 - INFO: [RENO] iter=18800 bpp=21.3873 anchor_num=20000
+Training progress:  63%|██████▎   | 18800/30000 [2:08:58<2:31:38,  1.23it/s, Loss=0.0889926]Training progress:  63%|██████▎   | 18900/30000 [2:08:58<2:30:04,  1.23it/s, Loss=0.0889926]2026-10-16 10:53:49,686 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 10:53:49,688 - INFO: 
+-----[ITER 19000] bits info (accurate): ttl_size_feat_MB=11.377950007095933, ttl_size_scaling_MB=3.3950052428990602, ttl_size_offsets_MB=5.312942638061941, ttl_size_MB=20.085897888056934-----
+2026-10-16 10:53:49,688 - INFO: 
+-----[ITER 19000] bits info (approx from visible): bit_per_feat_param=2.5475847721099854, ttl_size_feat_MB_approx=12.939444226191199-----
+2026-10-16 10:53:49,688 - INFO: 
+-----[ITER 19000] bits info: anchor_num=852132-----
+2026-10-16 10:53:49,689 - INFO: 
+-----[ITER 19000] bits info: 1_rate_mask=0.8795421719551086, mask_numel=852132, mask_size_MB=0.05391092598438263-----
+2026-10-16 10:53:49,695 - INFO: 
+-----[ITER 19000] RENO anchor rate term: avg_bpp_per_anchor=21.3918 (raw=21.2703), anchor_count_soft=749486.0-----
+Training progress:  63%|██████▎   | 18900/30000 [2:10:21<2:30:04,  1.23it/s, Loss=0.0892441]Training progress:  63%|██████▎   | 19000/30000 [2:10:21<2:29:54,  1.22it/s, Loss=0.0892441]2026-10-16 10:53:50,017 - INFO: [RENO] iter=19000 bpp=21.2865 anchor_num=20000
+Training progress:  63%|██████▎   | 19000/30000 [2:11:43<2:29:54,  1.22it/s, Loss=0.0912281]Training progress:  64%|██████▎   | 19100/30000 [2:11:43<2:28:29,  1.22it/s, Loss=0.0912281]Training progress:  64%|██████▎   | 19100/30000 [2:13:03<2:28:29,  1.22it/s, Loss=0.0844830]Training progress:  64%|██████▍   | 19200/30000 [2:13:03<2:26:33,  1.23it/s, Loss=0.0844830]2026-10-16 10:56:32,363 - INFO: [RENO] iter=19200 bpp=21.2455 anchor_num=20000
+Training progress:  64%|██████▍   | 19200/30000 [2:14:24<2:26:33,  1.23it/s, Loss=0.0824702]Training progress:  64%|██████▍   | 19300/30000 [2:14:24<2:24:37,  1.23it/s, Loss=0.0824702]Training progress:  64%|██████▍   | 19300/30000 [2:15:44<2:24:37,  1.23it/s, Loss=0.0773678]Training progress:  65%|██████▍   | 19400/30000 [2:15:44<2:23:01,  1.24it/s, Loss=0.0773678]2026-10-16 10:59:13,334 - INFO: [RENO] iter=19400 bpp=23.5041 anchor_num=20000
+Training progress:  65%|██████▍   | 19400/30000 [2:17:05<2:23:01,  1.24it/s, Loss=0.0737335]Training progress:  65%|██████▌   | 19500/30000 [2:17:05<2:21:27,  1.24it/s, Loss=0.0737335]Training progress:  65%|██████▌   | 19500/30000 [2:18:25<2:21:27,  1.24it/s, Loss=0.1107158]Training progress:  65%|██████▌   | 19600/30000 [2:18:25<2:20:01,  1.24it/s, Loss=0.1107158]2026-10-16 11:01:54,530 - INFO: [RENO] iter=19600 bpp=22.9671 anchor_num=20000
+Training progress:  65%|██████▌   | 19600/30000 [2:19:46<2:20:01,  1.24it/s, Loss=0.0744782]Training progress:  66%|██████▌   | 19700/30000 [2:19:46<2:18:29,  1.24it/s, Loss=0.0744782]Training progress:  66%|██████▌   | 19700/30000 [2:21:07<2:18:29,  1.24it/s, Loss=0.1067920]Training progress:  66%|██████▌   | 19800/30000 [2:21:07<2:17:12,  1.24it/s, Loss=0.1067920]2026-10-16 11:04:35,750 - INFO: [RENO] iter=19800 bpp=22.3918 anchor_num=20000
+Training progress:  66%|██████▌   | 19800/30000 [2:22:27<2:17:12,  1.24it/s, Loss=0.0674045]Training progress:  66%|██████▋   | 19900/30000 [2:22:27<2:15:56,  1.24it/s, Loss=0.0674045][DEBUG LevelSEGate gate_xyz] step=13000 per-level mean=['0.884', '0.887', '0.889', '0.886', '0.885', '0.886', '0.876', '0.882', '0.881', '0.878', '0.882', '0.877'] std=['0.000', '0.001', '0.001', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [16/10 09:29:43]
+[DEBUG LevelSEGate gate_xy] step=13000 per-level mean=['0.881', '0.878', '0.857', '0.875'] std=['0.001', '0.000', '0.009', '0.005'] (init was a uniform 0.881 for every level) [16/10 09:29:43]
+[DEBUG LevelSEGate gate_xz] step=13000 per-level mean=['0.879', '0.881', '0.876', '0.879'] std=['0.000', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:29:43]
+[DEBUG LevelSEGate gate_yz] step=13000 per-level mean=['0.881', '0.885', '0.882', '0.881'] std=['0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:29:43]
+[DEBUG Q_feat_adj] step=13000 no_cond: -0.1578/0.7253 cond: -5.6954/1081.6355 Q_feat_if_cond: 0.9062 [16/10 09:29:43]
+[DEBUG Q_feat_prepass] step=14000 Q_feat_adj: -1.0072/0.2099 Q_feat: 0.2493 [16/10 09:43:36]
+[DEBUG LevelSEGate gate_xyz] step=14000 per-level mean=['0.886', '0.885', '0.887', '0.886', '0.885', '0.886', '0.879', '0.884', '0.883', '0.881', '0.884', '0.879'] std=['0.000', '0.000', '0.001', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000'] (init was a uniform 0.881 for every level) [16/10 09:43:36]
+[DEBUG LevelSEGate gate_xy] step=14000 per-level mean=['0.883', '0.878', '0.866', '0.883'] std=['0.000', '0.000', '0.007', '0.004'] (init was a uniform 0.881 for every level) [16/10 09:43:36]
+[DEBUG LevelSEGate gate_xz] step=14000 per-level mean=['0.879', '0.882', '0.879', '0.882'] std=['0.000', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:43:36]
+[DEBUG LevelSEGate gate_yz] step=14000 per-level mean=['0.885', '0.887', '0.882', '0.882'] std=['0.002', '0.002', '0.001', '0.002'] (init was a uniform 0.881 for every level) [16/10 09:43:36]
+[DEBUG Q_feat_adj] step=14000 no_cond: -0.1452/0.7507 cond: 0.0311/0.7440 Q_feat_if_cond: 1.0108 [16/10 09:43:36]
+[DEBUG Q_feat_prepass] step=15000 Q_feat_adj: -0.2783/0.7971 Q_feat: 0.7763 [16/10 09:58:06]
+[DEBUG LevelSEGate gate_xyz] step=15000 per-level mean=['0.886', '0.885', '0.887', '0.887', '0.885', '0.886', '0.878', '0.885', '0.883', '0.881', '0.885', '0.880'] std=['0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:58:06]
+[DEBUG LevelSEGate gate_xy] step=15000 per-level mean=['0.883', '0.878', '0.878', '0.891'] std=['0.000', '0.000', '0.008', '0.005'] (init was a uniform 0.881 for every level) [16/10 09:58:06]
+[DEBUG LevelSEGate gate_xz] step=15000 per-level mean=['0.878', '0.881', '0.880', '0.882'] std=['0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [16/10 09:58:06]
+[DEBUG LevelSEGate gate_yz] step=15000 per-level mean=['0.882', '0.884', '0.882', '0.884'] std=['0.002', '0.001', '0.001', '0.002'] (init was a uniform 0.881 for every level) [16/10 09:58:06]
+[DEBUG Q_feat_adj] step=15000 no_cond: -0.1425/0.7782 cond: -24.4336/4214.9116 Q_feat_if_cond: 1.0075 [16/10 09:58:06]
+[DEBUG Q_feat_prepass] step=16000 Q_feat_adj: -0.3645/0.6032 Q_feat: 0.6978 [16/10 10:12:24]
+[DEBUG LevelSEGate gate_xyz] step=16000 per-level mean=['0.884', '0.884', '0.885', '0.885', '0.884', '0.885', '0.879', '0.884', '0.882', '0.881', '0.884', '0.882'] std=['0.001', '0.001', '0.001', '0.001', '0.000', '0.001', '0.001', '0.001', '0.000', '0.000', '0.001', '0.000'] (init was a uniform 0.881 for every level) [16/10 10:12:24]
+[DEBUG LevelSEGate gate_xy] step=16000 per-level mean=['0.882', '0.877', '0.879', '0.892'] std=['0.000', '0.000', '0.008', '0.005'] (init was a uniform 0.881 for every level) [16/10 10:12:24]
+[DEBUG LevelSEGate gate_xz] step=16000 per-level mean=['0.877', '0.880', '0.880', '0.882'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 10:12:24]
+[DEBUG LevelSEGate gate_yz] step=16000 per-level mean=['0.882', '0.884', '0.882', '0.884'] std=['0.001', '0.001', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 10:12:24]
+[DEBUG Q_feat_adj] step=16000 no_cond: -0.1673/0.7792 cond: -41.4605/8236.0195 Q_feat_if_cond: 1.0060 [16/10 10:12:24]
+[DEBUG Q_feat_prepass] step=17000 Q_feat_adj: -0.7142/0.6582 Q_feat: 0.4708 [16/10 10:26:24]
+[DEBUG LevelSEGate gate_xyz] step=17000 per-level mean=['0.885', '0.884', '0.886', '0.885', '0.885', '0.885', '0.879', '0.885', '0.883', '0.881', '0.885', '0.884'] std=['0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.001', '0.000', '0.000', '0.001', '0.000'] (init was a uniform 0.881 for every level) [16/10 10:26:24]
+[DEBUG LevelSEGate gate_xy] step=17000 per-level mean=['0.881', '0.877', '0.876', '0.890'] std=['0.000', '0.000', '0.010', '0.006'] (init was a uniform 0.881 for every level) [16/10 10:26:24]
+[DEBUG LevelSEGate gate_xz] step=17000 per-level mean=['0.876', '0.881', '0.880', '0.882'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 10:26:24]
+[DEBUG LevelSEGate gate_yz] step=17000 per-level mean=['0.882', '0.884', '0.882', '0.883'] std=['0.002', '0.002', '0.001', '0.002'] (init was a uniform 0.881 for every level) [16/10 10:26:24]
+[DEBUG Q_feat_adj] step=17000 no_cond: -0.1528/0.8743 cond: 0.0441/0.8823 Q_feat_if_cond: 1.0167 [16/10 10:26:24]
+[DEBUG Q_feat_prepass] step=18000 Q_feat_adj: -0.4592/0.7462 Q_feat: 0.6709 [16/10 10:40:13]
+[DEBUG LevelSEGate gate_xyz] step=18000 per-level mean=['0.885', '0.885', '0.886', '0.886', '0.885', '0.886', '0.878', '0.886', '0.882', '0.881', '0.886', '0.885'] std=['0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 10:40:13]
+[DEBUG LevelSEGate gate_xy] step=18000 per-level mean=['0.881', '0.877', '0.880', '0.893'] std=['0.000', '0.000', '0.010', '0.007'] (init was a uniform 0.881 for every level) [16/10 10:40:13]
+[DEBUG LevelSEGate gate_xz] step=18000 per-level mean=['0.876', '0.880', '0.881', '0.883'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 10:40:13]
+[DEBUG LevelSEGate gate_yz] step=18000 per-level mean=['0.881', '0.884', '0.882', '0.884'] std=['0.002', '0.001', '0.001', '0.002'] (init was a uniform 0.881 for every level) [16/10 10:40:13]
+[DEBUG Q_feat_adj] step=18000 no_cond: -0.2513/0.7517 cond: 0.3389/104.8092 Q_feat_if_cond: 0.8879 [16/10 10:40:13]
+[DEBUG Q_feat_prepass] step=19000 Q_feat_adj: -0.4207/0.6172 Q_feat: 0.6726 [16/10 10:53:47]
+[DEBUG LevelSEGate gate_xyz] step=19000 per-level mean=['0.883', '0.884', '0.884', '0.884', '0.885', '0.884', '0.878', '0.885', '0.882', '0.881', '0.885', '0.886'] std=['0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 10:53:47]
+[DEBUG LevelSEGate gate_xy] step=19000 per-level mean=['0.879', '0.876', '0.881', '0.894'] std=['0.000', '0.000', '0.008', '0.006'] (init was a uniform 0.881 for every level) [16/10 10:53:47]
+[DEBUG LevelSEGate gate_xz] step=19000 per-level mean=['0.875', '0.880', '0.880', '0.883'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 10:53:47]
+[DEBUG LevelSEGate gate_yz] step=19000 per-level mean=['0.881', '0.883', '0.882', '0.884'] std=['0.001', '0.001', '0.001', '0.002'] (init was a uniform 0.881 for every level) [16/10 10:53:47]
+[DEBUG Q_feat_adj] step=19000 no_cond: -0.2810/0.7459 cond: -0.2405/0.7815 Q_feat_if_cond: 0.8581 [16/10 10:53:47]
+[DEBUG Q_feat_prepass] step=20000 Q_feat_adj: -1.0062/0.4821 Q_feat: 0.3019 [16/10 11:07:16]
+[DEBUG LevelSEGate gate_xyz] step=20000 per-level mean=['0.883', '0.884', '0.884', '0.884', '0.885', '0.884', '0.877', '0.885', '0.882', '0.881', '0.886', '0.887'] std=['0.000', '0.000', '0.001', '0.000', '0.000', '0.001', '0.001', '0.001', '0.000', '0.000', '0.000', '0.001'] (init was a uniform 0.881 for every level)2026-10-16 11:07:18,733 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 11:07:18,733 - INFO: 
+-----[ITER 20000] bits info (accurate): ttl_size_feat_MB=11.57200431637466, ttl_size_scaling_MB=3.373964820522815, ttl_size_offsets_MB=5.229535580612719, ttl_size_MB=20.175504717510194-----
+2026-10-16 11:07:18,733 - INFO: 
+-----[ITER 20000] bits info (approx from visible): bit_per_feat_param=2.6303651332855225, ttl_size_feat_MB_approx=13.359894166927688-----
+2026-10-16 11:07:18,733 - INFO: 
+-----[ITER 20000] bits info: anchor_num=852132-----
+2026-10-16 11:07:18,734 - INFO: 
+-----[ITER 20000] bits info: 1_rate_mask=0.8683971762657166, mask_numel=852132, mask_size_MB=0.0570744052529335-----
+2026-10-16 11:07:18,740 - INFO: 
+-----[ITER 20000] RENO anchor rate term: avg_bpp_per_anchor=21.9738 (raw=22.0664), anchor_count_soft=739989.0-----
+Training progress:  66%|██████▋   | 19900/30000 [2:23:50<2:15:56,  1.24it/s, Loss=0.0775753]Training progress:  67%|██████▋   | 20000/30000 [2:23:50<2:15:26,  1.23it/s, Loss=0.0775753]2026-10-16 11:07:19,056 - INFO: [RENO] iter=20000 bpp=22.0515 anchor_num=20000
+Training progress:  67%|██████▋   | 20000/30000 [2:25:10<2:15:26,  1.23it/s, Loss=0.0745974]Training progress:  67%|██████▋   | 20100/30000 [2:25:10<2:13:30,  1.24it/s, Loss=0.0745974]Training progress:  67%|██████▋   | 20100/30000 [2:26:30<2:13:30,  1.24it/s, Loss=0.1076582]Training progress:  67%|██████▋   | 20200/30000 [2:26:30<2:11:55,  1.24it/s, Loss=0.1076582]2026-10-16 11:09:59,603 - INFO: [RENO] iter=20200 bpp=21.7193 anchor_num=20000
+Training progress:  67%|██████▋   | 20200/30000 [2:27:51<2:11:55,  1.24it/s, Loss=0.0859995]Training progress:  68%|██████▊   | 20300/30000 [2:27:51<2:10:21,  1.24it/s, Loss=0.0859995]Training progress:  68%|██████▊   | 20300/30000 [2:29:11<2:10:21,  1.24it/s, Loss=0.0934286]Training progress:  68%|██████▊   | 20400/30000 [2:29:11<2:08:40,  1.24it/s, Loss=0.0934286]2026-10-16 11:12:39,849 - INFO: [RENO] iter=20400 bpp=21.5581 anchor_num=20000
+Training progress:  68%|██████▊   | 20400/30000 [2:30:31<2:08:40,  1.24it/s, Loss=0.0950502]Training progress:  68%|██████▊   | 20500/30000 [2:30:31<2:07:07,  1.25it/s, Loss=0.0950502]Training progress:  68%|██████▊   | 20500/30000 [2:31:51<2:07:07,  1.25it/s, Loss=0.0694603]Training progress:  69%|██████▊   | 20600/30000 [2:31:51<2:05:47,  1.25it/s, Loss=0.0694603]2026-10-16 11:15:20,130 - INFO: [RENO] iter=20600 bpp=23.0455 anchor_num=20000
+Training progress:  69%|██████▊   | 20600/30000 [2:33:11<2:05:47,  1.25it/s, Loss=0.0982255]Training progress:  69%|██████▉   | 20700/30000 [2:33:11<2:04:07,  1.25it/s, Loss=0.0982255]Training progress:  69%|██████▉   | 20700/30000 [2:34:30<2:04:07,  1.25it/s, Loss=0.0897799]Training progress:  69%|██████▉   | 20800/30000 [2:34:30<2:02:34,  1.25it/s, Loss=0.0897799]2026-10-16 11:17:59,314 - INFO: [RENO] iter=20800 bpp=22.5976 anchor_num=20000
+Training progress:  69%|██████▉   | 20800/30000 [2:35:50<2:02:34,  1.25it/s, Loss=0.0754434]Training progress:  70%|██████▉   | 20900/30000 [2:35:50<2:01:20,  1.25it/s, Loss=0.0754434]2026-10-16 11:20:41,298 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 11:20:41,298 - INFO: 
+-----[ITER 21000] bits info (accurate): ttl_size_feat_MB=11.33104469627142, ttl_size_scaling_MB=3.334905560128391, ttl_size_offsets_MB=5.065083025023341, ttl_size_MB=19.73103328142315-----
+2026-10-16 11:20:41,298 - INFO: 
+-----[ITER 21000] bits info (approx from visible): bit_per_feat_param=2.60071063041687, ttl_size_feat_MB_approx=13.209275906791618-----
+2026-10-16 11:20:41,298 - INFO: 
+-----[ITER 21000] bits info: anchor_num=852132-----
+2026-10-16 11:20:41,299 - INFO: 
+-----[ITER 21000] bits info: 1_rate_mask=0.8588728308677673, mask_numel=852132, mask_size_MB=0.05965109169483185-----
+2026-10-16 11:20:41,305 - INFO: 
+-----[ITER 21000] RENO anchor rate term: avg_bpp_per_anchor=22.0860 (raw=21.9970), anchor_count_soft=731873.0-----
+Training progress:  70%|██████▉   | 20900/30000 [2:37:12<2:01:20,  1.25it/s, Loss=0.0846245]Training progress:  70%|███████   | 21000/30000 [2:37:12<2:00:58,  1.24it/s, Loss=0.0846245]2026-10-16 11:20:41,642 - INFO: [RENO] iter=21000 bpp=22.0758 anchor_num=20000
+Training progress:  70%|███████   | 21000/30000 [2:38:33<2:00:58,  1.24it/s, Loss=0.0883384]Training progress:  70%|███████   | 21100/30000 [2:38:33<1:59:30,  1.24it/s, Loss=0.0883384]Training progress:  70%|███████   | 21100/30000 [2:39:52<1:59:30,  1.24it/s, Loss=0.0642414]Training progress:  71%|███████   | 21200/30000 [2:39:52<1:57:35,  1.25it/s, Loss=0.0642414]2026-10-16 11:23:21,265 - INFO: [RENO] iter=21200 bpp=21.6095 anchor_num=20000
+Training progress:  71%|███████   | 21200/30000 [2:41:12<1:57:35,  1.25it/s, Loss=0.0913999]Training progress:  71%|███████   | 21300/30000 [2:41:12<1:56:07,  1.25it/s, Loss=0.0913999]Training progress:  71%|███████   | 21300/30000 [2:42:32<1:56:07,  1.25it/s, Loss=0.0912638]Training progress:  71%|███████▏  | 21400/30000 [2:42:32<1:54:46,  1.25it/s, Loss=0.0912638]2026-10-16 11:26:01,217 - INFO: [RENO] iter=21400 bpp=21.4533 anchor_num=20000
+Training progress:  71%|███████▏  | 21400/30000 [2:43:51<1:54:46,  1.25it/s, Loss=0.0735805]Training progress:  72%|███████▏  | 21500/30000 [2:43:51<1:53:01,  1.25it/s, Loss=0.0735805]Training progress:  72%|███████▏  | 21500/30000 [2:45:11<1:53:01,  1.25it/s, Loss=0.1027913]Training progress:  72%|███████▏  | 21600/30000 [2:45:11<1:51:31,  1.26it/s, Loss=0.1027913]2026-10-16 11:28:39,681 - INFO: [RENO] iter=21600 bpp=21.2322 anchor_num=20000
+Training progress:  72%|███████▏  | 21600/30000 [2:46:30<1:51:31,  1.26it/s, Loss=0.0747431]Training progress:  72%|███████▏  | 21700/30000 [2:46:30<1:50:12,  1.26it/s, Loss=0.0747431]Training progress:  72%|███████▏  | 21700/30000 [2:47:49<1:50:12,  1.26it/s, Loss=0.1028170]Training progress:  73%|███████▎  | 21800/30000 [2:47:49<1:48:37,  1.26it/s, Loss=0.1028170]2026-10-16 11:31:18,429 - INFO: [RENO] iter=21800 bpp=21.2871 anchor_num=20000
+Training progress:  73%|███████▎  | 21800/30000 [2:49:09<1:48:37,  1.26it/s, Loss=0.0896641]Training progress:  73%|███████▎  | 21900/30000 [2:49:09<1:47:19,  1.26it/s, Loss=0.0896641]2026-10-16 11:33:58,684 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 11:33:58,684 - INFO: 
+-----[ITER 22000] bits info (accurate): ttl_size_feat_MB=11.32556333579123, ttl_size_scaling_MB=3.32191122462973, ttl_size_offsets_MB=4.958908076398075, ttl_size_MB=19.606382636819035-----
+2026-10-16 11:33:58,685 - INFO: 
+-----[ITER 22000] bits info (approx from visible): bit_per_feat_param=2.6249115467071533, ttl_size_feat_MB_approx=13.332194841615319-----
+2026-10-16 11:33:58,685 - INFO: 
+-----[ITER 22000] bits info: anchor_num=852132-----
+2026-10-16 11:33:58,685 - INFO: 
+-----[ITER 22000] bits info: 1_rate_mask=0.8506792783737183, mask_numel=852132, mask_size_MB=0.06177970767021179-----
+2026-10-16 11:33:58,691 - INFO: 
+-----[ITER 22000] RENO anchor rate term: avg_bpp_per_anchor=21.6366 (raw=21.2057), anchor_count_soft=724891.0-----
+Training progress:  73%|███████▎  | 21900/30000 [2:50:30<1:47:19,  1.26it/s, Loss=0.0792920]Training progress:  73%|███████▎  | 22000/30000 [2:50:30<1:46:38,  1.25it/s, Loss=0.0792920]2026-10-16 11:33:59,054 - INFO: [RENO] iter=22000 bpp=21.1759 anchor_num=20000
+Training progress:  73%|███████▎  | 22000/30000 [2:51:49<1:46:38,  1.25it/s, Loss=0.0966538]Training progress:  74%|███████▎  | 22100/30000 [2:51:49<1:44:53,  1.26it/s, Loss=0.0966538]Training progress:  74%|███████▎  | 22100/30000 [2:53:08<1:44:53,  1.26it/s, Loss=0.0773490]Training progress:  74%|███████▍  | 22200/30000 [2:53:08<1:43:25,  1.26it/s, Loss=0.0773490]2026-10-16 11:36:37,310 - INFO: [RENO] iter=22200 bpp=21.1461 anchor_num=20000
+Training progress:  74%|███████▍  | 22200/30000 [2:54:27<1:43:25,  1.26it/s, Loss=0.0791635]Training progress:  74%|███████▍  | 22300/30000 [2:54:27<1:41:52,  1.26it/s, Loss=0.0791635]Training progress:  74%|███████▍  | 22300/30000 [2:55:47<1:41:52,  1.26it/s, Loss=0.0856453]Training progress:  75%|███████▍  | 22400/30000 [2:55:47<1:40:35,  1.26it/s, Loss=0.0856453]2026-10-16 11:39:15,748 - INFO: [RENO] iter=22400 bpp=21.1594 anchor_num=20000
+Training progress:  75%|███████▍  | 22400/30000 [2:57:05<1:40:35,  1.26it/s, Loss=0.0725150]Training progress:  75%|███████▌  | 22500/30000 [2:57:05<1:38:58,  1.26it/s, Loss=0.0725150]Training progress:  75%|███████▌  | 22500/30000 [2:58:24<1:38:58,  1.26it/s, Loss=0.0907097]Training progress:  75%|███████▌  | 22600/30000 [2:58:24<1:37:24,  1.27it/s, Loss=0.0907097]2026-10-16 11:41:52,915 - INFO: [RENO] iter=22600 bpp=21.1511 anchor_num=20000
+Training progress:  75%|███████▌  | 22600/30000 [2:59:43<1:37:24,  1.27it/s, Loss=0.0694235]Training progress:  76%|███████▌  | 22700/30000 [2:59:43<1:36:03,  1.27it/s, Loss=0.0694235]Training progress:  76%|███████▌  | 22700/30000 [3:01:02<1:36:03,  1.27it/s, Loss=0.0849130]Training progress:  76%|███████▌  | 22800/30000 [3:01:02<1:34:47,  1.27it/s, Loss=0.0849130]2026-10-16 11:44:30,899 - INFO: [RENO] iter=22800 bpp=21.1002 anchor_num=20000
+Training progress:  76%|███████▌  | 22800/30000 [3:02:21<1:34:47,  1.27it/s, Loss=0.0852849]Training progress:  76%|███████▋  | 22900/30000 [3:02:21<1:33:30,  1.27it/s, Loss=0.0852849]2026-10-16 11:47:10,842 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 11:47:10,842 - INFO: 
+-----[ITER 23000] bits info (accurate): ttl_size_feat_MB=11.58079513721168, ttl_size_scaling_MB=3.3222824675031006, ttl_size_offsets_MB=4.955902775749564, ttl_size_MB=19.858980380464345-----
+2026-10-16 11:47:10,842 - INFO: 
+-----[ITER 23000] bits info (approx from visible): bit_per_feat_param=2.709071397781372, ttl_size_feat_MB_approx=13.75965135296724-----
+2026-10-16 11:47:10,842 - INFO: 
+-----[ITER 23000] bits info: anchor_num=852132-----
+2026-10-16 11:47:10,843 - INFO: 
+-----[ITER 23000] bits info: 1_rate_mask=0.8435313105583191, mask_numel=852132, mask_size_MB=0.06357327848672867-----
+2026-10-16 11:47:10,849 - INFO: 
+-----[ITER 23000] RENO anchor rate term: avg_bpp_per_anchor=21.3184 (raw=21.1081), anchor_count_soft=718800.0-----
+Training progress:  76%|███████▋  | 22900/30000 [3:03:42<1:33:30,  1.27it/s, Loss=0.0699124]Training progress:  77%|███████▋  | 23000/30000 [3:03:42<1:32:57,  1.26it/s, Loss=0.0699124]2026-10-16 11:47:11,166 - INFO: [RENO] iter=23000 bpp=21.1440 anchor_num=20000
+Training progress:  77%|███████▋  | 23000/30000 [3:05:00<1:32:57,  1.26it/s, Loss=0.0949379]Training progress:  77%|███████▋  | 23100/30000 [3:05:00<1:31:05,  1.26it/s, Loss=0.0949379]Training progress:  77%|███████▋  | 23100/30000 [3:06:19<1:31:05,  1.26it/s, Loss=0.0790402]Training progress:  77%|███████▋  | 23200/30000 [3:06:19<1:29:32,  1.27it/s, Loss=0.0790402]2026-10-16 11:49:47,825 - INFO: [RENO] iter=23200 bpp=21.0731 anchor_num=20000
+Training progress:  77%|███████▋  | 23200/30000 [3:07:37<1:29:32,  1.27it/s, Loss=0.0642737]Training progress:  78%|███████▊  | 23300/30000 [3:07:37<1:27:56,  1.27it/s, Loss=0.0642737]Training progress:  78%|███████▊  | 23300/30000 [3:08:56<1:27:56,  1.27it/s, Loss=0.0721999]Training progress:  78%|███████▊  | 23400/30000 [3:08:56<1:26:43,  1.27it/s, Loss=0.0721999]2026-10-16 11:52:25,045 - INFO: [RENO] iter=23400 bpp=21.1408 anchor_num=20000
+Training progress:  78%|███████▊  | 23400/30000 [3:10:14<1:26:43,  1.27it/s, Loss=0.0720831]Training progress:  78%|███████▊  | 23500/30000 [3:10:14<1:25:14,  1.27it/s, Loss=0.0720831]Training progress:  78%|███████▊  | 23500/30000 [3:11:32<1:25:14,  1.27it/s, Loss=0.0963993]Training progress:  79%|███████▊  | 23600/30000 [3:11:32<1:23:33,  1.28it/s, Loss=0.0963993]2026-10-16 11:55:00,875 - INFO: [RENO] iter=23600 bpp=21.1359 anchor_num=20000
+Training progress:  79%|███████▊  | 23600/30000 [3:12:49<1:23:33,  1.28it/s, Loss=0.0659113]Training progress:  79%|███████▉  | 23700/30000 [3:12:49<1:21:54,  1.28it/s, Loss=0.0659113]Training progress:  79%|███████▉  | 23700/30000 [3:14:07<1:21:54,  1.28it/s, Loss=0.0904794]Training progress:  79%|███████▉  | 23800/30000 [3:14:07<1:20:31,  1.28it/s, Loss=0.0904794]2026-10-16 11:57:35,866 - INFO: [RENO] iter=23800 bpp=21.0295 anchor_num=20000
+Training progress:  79%|███████▉  | 23800/30000 [3:15:24<1:20:31,  1.28it/s, Loss=0.0735844]Training progress:  80%|███████▉  | 23900/30000 [3:15:24<1:19:05,  1.29it/s, Loss=0.0735844]2026-10-16 12:00:13,547 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 12:00:13,547 - INFO: 
+-----[ITER 24000] bits info (accurate): ttl_size_feat_MB=11.329935347661376, ttl_size_scaling_MB=3.297683410346508, ttl_size_offsets_MB=4.831144672818482, ttl_size_MB=19.458763430826366-----
+2026-10-16 12:00:13,547 - INFO: 
+-----[ITER 24000] bits info (approx from visible): bit_per_feat_param=2.666574716567993, ttl_size_feat_MB_approx=13.543806352487309-----
+2026-10-16 12:00:13,547 - INFO: 
+-----[ITER 24000] bits info: anchor_num=852132-----
+2026-10-16 12:00:13,548 - INFO: 
+-----[ITER 24000] bits info: 1_rate_mask=0.8372799158096313, mask_numel=852132, mask_size_MB=0.06509529054164886-----
+2026-10-16 12:00:13,554 - INFO: 
+-----[ITER 24000] RENO anchor rate term: avg_bpp_per_anchor=21.1729 (raw=21.0889), anchor_count_soft=713473.0-----
+Training progress:  80%|███████▉  | 23900/30000 [3:16:45<1:19:05,  1.29it/s, Loss=0.0830685]Training progress:  80%|████████  | 24000/30000 [3:16:45<1:18:38,  1.27it/s, Loss=0.0830685]2026-10-16 12:00:13,946 - INFO: [RENO] iter=24000 bpp=21.1124 anchor_num=20000
+Training progress:  80%|████████  | 24000/30000 [3:18:02<1:18:38,  1.27it/s, Loss=0.0824734]Training progress:  80%|████████  | 24100/30000 [3:18:02<1:16:55,  1.28it/s, Loss=0.0824734]Training progress:  80%|████████  | 24100/30000 [3:19:20<1:16:55,  1.28it/s, Loss=0.0667738]Training progress:  81%|████████  | 24200/30000 [3:19:20<1:15:32,  1.28it/s, Loss=0.0667738]2026-10-16 12:02:49,188 - INFO: [RENO] iter=24200 bpp=20.9973 anchor_num=20000
+Training progress:  81%|████████  | 24200/30000 [3:20:37<1:15:32,  1.28it/s, Loss=0.0827060]Training progress:  81%|████████  | 24300/30000 [3:20:37<1:14:01,  1.28it/s, Loss=0.0827060]Training progress:  81%|████████  | 24300/30000 [3:21:54<1:14:01,  1.28it/s, Loss=0.0939220]Training progress:  81%|████████▏ | 24400/30000 [3:21:54<1:12:23,  1.29it/s, Loss=0.0939220]2026-10-16 12:05:23,327 - INFO: [RENO] iter=24400 bpp=21.0318 anchor_num=20000
+Training progress:  81%|████████▏ | 24400/30000 [3:23:11<1:12:23,  1.29it/s, Loss=0.0994493]Training progress:  82%|████████▏ | 24500/30000 [3:23:11<1:11:01,  1.29it/s, Loss=0.0994493]Training progress:  82%|████████▏ | 24500/30000 [3:24:29<1:11:01,  1.29it/s, Loss=0.0921290]Training progress:  82%|████████▏ | 24600/30000 [3:24:29<1:09:38,  1.29it/s, Loss=0.0921290]2026-10-16 12:07:57,732 - INFO: [RENO] iter=24600 bpp=21.0699 anchor_num=20000
+Training progress:  82%|████████▏ | 24600/30000 [3:25:46<1:09:38,  1.29it/s, Loss=0.0798868]Training progress:  82%|████████▏ | 24700/30000 [3:25:46<1:08:27,  1.29it/s, Loss=0.0798868]Training progress:  82%|████████▏ | 24700/30000 [3:27:03<1:08:27,  1.29it/s, Loss=0.0828509]Training progress:  83%|████████▎ | 24800/30000 [3:27:03<1:07:01,  1.29it/s, Loss=0.0828509]2026-10-16 12:10:32,469 - INFO: [RENO] iter=24800 bpp=21.0871 anchor_num=20000
+Training progress:  83%|████████▎ | 24800/30000 [3:28:20<1:07:01,  1.29it/s, Loss=0.0802323]Training progress:  83%|████████▎ | 24900/30000 [3:28:20<1:05:33,  1.30it/s, Loss=0.0802323]2026-10-16 12:13:08,190 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 12:13:08,190 - INFO: 
+-----[ITER 25000] bits info (accurate): ttl_size_feat_MB=11.348798501305282, ttl_size_scaling_MB=3.2919947642367333, ttl_size_offsets_MB=4.789664465934038, ttl_size_MB=19.430457731476054-----
+2026-10-16 12:13:08,190 - INFO: 
+-----[ITER 25000] bits info (approx from visible): bit_per_feat_param=2.6673717498779297, ttl_size_feat_MB_approx=13.547854566377282-----
+2026-10-16 12:13:08,190 - INFO: 
+-----[ITER 25000] bits info: anchor_num=852132-----
+2026-10-16 12:13:08,191 - INFO: 
+-----[ITER 25000] bits info: 1_rate_mask=0.8318606019020081, mask_numel=852132, mask_size_MB=0.06638066470623016-----
+2026-10-16 12:13:08,196 - INFO: 
+-----[ITER 25000] RENO anchor rate term: avg_bpp_per_anchor=21.0963 (raw=21.0097), anchor_count_soft=708855.0-----
+Training progress:  83%|████████▎ | 24900/30000 [3:29:39<1:05:33,  1.30it/s, Loss=0.0816241]Training progress:  83%|████████▎ | 25000/30000 [3:29:39<1:04:50,  1.29it/s, Loss=0.0816241]2026-10-16 12:13:08,535 - INFO: [RENO] iter=25000 bpp=21.0688 anchor_num=20000
+Training progress:  83%|████████▎ | 25000/30000 [3:30:56<1:04:50,  1.29it/s, Loss=0.0801248]Training progress:  84%|████████▎ | 25100/30000 [3:30:56<1:03:17,  1.29it/s, Loss=0.0801248]Training progress:  84%|████████▎ | 25100/30000 [3:32:13<1:03:17,  1.29it/s, Loss=0.0725431]Training progress:  84%|████████▍ | 25200/30000 [3:32:13<1:01:46,  1.29it/s, Loss=0.0725431]2026-10-16 12:15:41,873 - INFO: [RENO] iter=25200 bpp=21.0329 anchor_num=20000
+Training progress:  84%|████████▍ | 25200/30000 [3:33:30<1:01:46,  1.29it/s, Loss=0.0736288]Training progress:  84%|████████▍ | 25300/30000 [3:33:30<1:00:24,  1.30it/s, Loss=0.0736288]Training progress:  84%|████████▍ | 25300/30000 [3:34:47<1:00:24,  1.30it/s, Loss=0.0792971]Training progress:  85%|████████▍ | 25400/30000 [3:34:47<59:07,  1.30it/s, Loss=0.0792971]  2026-10-16 12:18:15,864 - INFO: [RENO] iter=25400 bpp=20.9634 anchor_num=20000
+Training progress:  85%|████████▍ | 25400/30000 [3:36:04<59:07,  1.30it/s, Loss=0.0905977]Training progress:  85%|████████▌ | 25500/30000 [3:36:04<57:47,  1.30it/s, Loss=0.0905977]Training progress:  85%|████████▌ | 25500/30000 [3:37:21<57:47,  1.30it/s, Loss=0.0681348]Training progress:  85%|████████▌ | 25600/30000 [3:37:21<56:37,  1.30it/s, Loss=0.0681348]2026-10-16 12:20:50,339 - INFO: [RENO] iter=25600 bpp=20.9838 anchor_num=20000
+Training progress:  85%|████████▌ | 25600/30000 [3:38:38<56:37,  1.30it/s, Loss=0.0807419]Training progress:  86%|████████▌ | 25700/30000 [3:38:38<55:21,  1.29it/s, Loss=0.0807419]Training progress:  86%|████████▌ | 25700/30000 [3:39:56<55:21,  1.29it/s, Loss=0.0958951]Training progress:  86%|████████▌ | 25800/30000 [3:39:56<54:09,  1.29it/s, Loss=0.0958951]2026-10-16 12:23:25,359 - INFO: [RENO] iter=25800 bpp=21.0116 anchor_num=20000
+Training progress:  86%|████████▌ | 25800/30000 [3:41:14<54:09,  1.29it/s, Loss=0.0692320]Training progress:  86%|████████▋ | 25900/30000 [3:41:14<52:56,  1.29it/s, Loss=0.0692320]2026-10-16 12:26:02,295 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 12:26:02,295 - INFO: 
+-----[ITER 26000] bits info (accurate): ttl_size_feat_MB=11.43518315255642, ttl_size_scaling_MB=3.2824189085513353, ttl_size_offsets_MB=4.746596096083522, ttl_size_MB=19.464198157191277-----
+2026-10-16 12:26:02,295 - INFO: 
+-----[ITER 26000] bits info (approx from visible): bit_per_feat_param=2.7253875732421875, ttl_size_feat_MB_approx=13.842522880804609-----
+2026-10-16 12:26:02,295 - INFO: 
+-----[ITER 26000] bits info: anchor_num=852132-----
+2026-10-16 12:26:02,296 - INFO: 
+-----[ITER 26000] bits info: 1_rate_mask=0.8272638916969299, mask_numel=852132, mask_size_MB=0.0674467608332634-----
+2026-10-16 12:26:02,302 - INFO: 
+-----[ITER 26000] RENO anchor rate term: avg_bpp_per_anchor=21.0411 (raw=21.0222), anchor_count_soft=704938.0-----
+Training progress:  86%|████████▋ | 25900/30000 [3:42:33<52:56,  1.29it/s, Loss=0.0651098]Training progress:  87%|████████▋ | 26000/30000 [3:42:33<52:04,  1.28it/s, Loss=0.0651098]2026-10-16 12:26:02,625 - INFO: [RENO] iter=26000 bpp=21.0140 anchor_num=20000
+Training progress:  87%|████████▋ | 26000/30000 [3:43:51<52:04,  1.28it/s, Loss=0.0624737]Training progress:  87%|████████▋ | 26100/30000 [3:43:51<50:37,  1.28it/s, Loss=0.0624737]Training progress:  87%|████████▋ | 26100/30000 [3:45:08<50:37,  1.28it/s, Loss=0.0770978]Training progress:  87%|████████▋ | 26200/30000 [3:45:08<49:14,  1.29it/s, Loss=0.0770978]2026-10-16 12:28:37,448 - INFO: [RENO] iter=26200 bpp=21.0145 anchor_num=20000
+Training progress:  87%|████████▋ | 26200/30000 [3:46:26<49:14,  1.29it/s, Loss=0.0790272]Training progress:  88%|████████▊ | 26300/30000 [3:46:26<47:54,  1.29it/s, Loss=0.0790272]Training progress:  88%|████████▊ | 26300/30000 [3:47:43<47:54,  1.29it/s, Loss=0.0757760]Training progress:  88%|████████▊ | 26400/30000 [3:47:43<46:31,  1.29it/s, Loss=0.0757760]2026-10-16 12:31:12,217 - INFO: [RENO] iter=26400 bpp=20.9923 anchor_num=20000
+Training progress:  88%|████████▊ | 26400/30000 [3:49:00<46:31,  1.29it/s, Loss=0.0710254]Training progress:  88%|████████▊ | 26500/30000 [3:49:00<45:06,  1.29it/s, Loss=0.0710254]Training progress:  88%|████████▊ | 26500/30000 [3:50:17<45:06,  1.29it/s, Loss=0.0550044]Training progress:  89%|████████▊ | 26600/30000 [3:50:17<43:48,  1.29it/s, Loss=0.0550044]2026-10-16 12:33:46,256 - INFO: [RENO] iter=26600 bpp=21.0382 anchor_num=20000
+Training progress:  89%|████████▊ | 26600/30000 [3:51:33<43:48,  1.29it/s, Loss=0.0779048]Training progress:  89%|████████▉ | 26700/30000 [3:51:33<42:20,  1.30it/s, Loss=0.0779048]Training progress:  89%|████████▉ | 26700/30000 [3:52:50<42:20,  1.30it/s, Loss=0.0841599]Training progress:  89%|████████▉ | 26800/30000 [3:52:50<40:59,  1.30it/s, Loss=0.0841599]2026-10-16 12:36:19,029 - INFO: [RENO] iter=26800 bpp=21.0040 anchor_num=20000
+Training progress:  89%|████████▉ | 26800/30000 [3:54:07<40:59,  1.30it/s, Loss=0.0613612]Training progress:  90%|████████▉ | 26900/30000 [3:54:07<39:47,  1.30it/s, Loss=0.0613612] [16/10 11:07:16]
+[DEBUG LevelSEGate gate_xy] step=20000 per-level mean=['0.878', '0.875', '0.868', '0.885'] std=['0.000', '0.001', '0.013', '0.008'] (init was a uniform 0.881 for every level) [16/10 11:07:16]
+[DEBUG LevelSEGate gate_xz] step=20000 per-level mean=['0.875', '0.880', '0.879', '0.883'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 11:07:16]
+[DEBUG LevelSEGate gate_yz] step=20000 per-level mean=['0.883', '0.884', '0.882', '0.882'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 11:07:16]
+[DEBUG Q_feat_adj] step=20000 no_cond: -0.3752/0.6771 cond: -0.2893/0.7340 Q_feat_if_cond: 0.8132 [16/10 11:07:16]
+==== MASK GRAD DEBUG ==== [16/10 11:07:18]
+_mask: mean=-4.6466, grad_none=False, grad_norm=1.0321e-04 [16/10 11:07:18]
+_mask sigmoid mean=0.1732, grad_none=False, grad_norm=1.0321e-04 [16/10 11:07:18]
+[DEBUG Q_feat_prepass] step=21000 Q_feat_adj: -0.7335/0.7397 Q_feat: 0.4780 [16/10 11:20:38]
+[DEBUG LevelSEGate gate_xyz] step=21000 per-level mean=['0.883', '0.884', '0.885', '0.885', '0.886', '0.884', '0.877', '0.885', '0.883', '0.880', '0.887', '0.889'] std=['0.000', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 11:20:38]
+[DEBUG LevelSEGate gate_xy] step=21000 per-level mean=['0.878', '0.875', '0.876', '0.890'] std=['0.000', '0.001', '0.013', '0.008'] (init was a uniform 0.881 for every level) [16/10 11:20:38]
+[DEBUG LevelSEGate gate_xz] step=21000 per-level mean=['0.874', '0.880', '0.880', '0.884'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 11:20:38]
+[DEBUG LevelSEGate gate_yz] step=21000 per-level mean=['0.882', '0.884', '0.882', '0.883'] std=['0.003', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 11:20:38]
+[DEBUG Q_feat_adj] step=21000 no_cond: -0.2934/0.7868 cond: -0.2031/0.8046 Q_feat_if_cond: 0.8598 [16/10 11:20:39]
+[DEBUG Q_feat_prepass] step=22000 Q_feat_adj: -0.7794/0.6206 Q_feat: 0.4442 [16/10 11:33:56]
+[DEBUG LevelSEGate gate_xyz] step=22000 per-level mean=['0.883', '0.884', '0.885', '0.885', '0.886', '0.884', '0.877', '0.885', '0.883', '0.880', '0.888', '0.889'] std=['0.000', '0.000', '0.001', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 11:33:56]
+[DEBUG LevelSEGate gate_xy] step=22000 per-level mean=['0.878', '0.875', '0.875', '0.890'] std=['0.000', '0.001', '0.013', '0.008'] (init was a uniform 0.881 for every level) [16/10 11:33:56]
+[DEBUG LevelSEGate gate_xz] step=22000 per-level mean=['0.874', '0.880', '0.880', '0.884'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 11:33:56]
+[DEBUG LevelSEGate gate_yz] step=22000 per-level mean=['0.881', '0.883', '0.882', '0.884'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 11:33:56]
+[DEBUG Q_feat_adj] step=22000 no_cond: -0.3506/0.7038 cond: -0.2364/0.7801 Q_feat_if_cond: 0.8459 [16/10 11:33:56]
+[DEBUG Q_feat_prepass] step=23000 Q_feat_adj: -0.9846/0.4713 Q_feat: 0.3098 [16/10 11:47:08]
+[DEBUG LevelSEGate gate_xyz] step=23000 per-level mean=['0.882', '0.883', '0.884', '0.884', '0.886', '0.884', '0.877', '0.885', '0.883', '0.880', '0.887', '0.889'] std=['0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 11:47:08]
+[DEBUG LevelSEGate gate_xy] step=23000 per-level mean=['0.877', '0.875', '0.869', '0.886'] std=['0.000', '0.001', '0.013', '0.008'] (init was a uniform 0.881 for every level) [16/10 11:47:08]
+[DEBUG LevelSEGate gate_xz] step=23000 per-level mean=['0.875', '0.880', '0.879', '0.883'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 11:47:08]
+[DEBUG LevelSEGate gate_yz] step=23000 per-level mean=['0.882', '0.884', '0.882', '0.882'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 11:47:08]
+[DEBUG Q_feat_adj] step=23000 no_cond: -0.4195/0.6534 cond: -0.3141/5.1255 Q_feat_if_cond: 0.8061 [16/10 11:47:08]
+[DEBUG Q_feat_prepass] step=24000 Q_feat_adj: -0.4812/0.6742 Q_feat: 0.6643 [16/10 12:00:11]
+[DEBUG LevelSEGate gate_xyz] step=24000 per-level mean=['0.882', '0.883', '0.884', '0.884', '0.886', '0.883', '0.877', '0.885', '0.883', '0.880', '0.888', '0.890'] std=['0.000', '0.000', '0.000', '0.000', '0.001', '0.000', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 12:00:11]
+[DEBUG LevelSEGate gate_xy] step=24000 per-level mean=['0.877', '0.875', '0.879', '0.892'] std=['0.000', '0.001', '0.012', '0.007'] (init was a uniform 0.881 for every level) [16/10 12:00:11]
+[DEBUG LevelSEGate gate_xz] step=24000 per-level mean=['0.874', '0.880', '0.881', '0.884'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 12:00:11]
+[DEBUG LevelSEGate gate_yz] step=24000 per-level mean=['0.880', '0.883', '0.882', '0.885'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 12:00:11]
+[DEBUG Q_feat_adj] step=24000 no_cond: -0.3737/0.6953 cond: -0.2581/3.2331 Q_feat_if_cond: 0.8477 [16/10 12:00:11]
+[DEBUG Q_feat_prepass] step=25000 Q_feat_adj: -0.6253/0.6362 Q_feat: 0.5577 [16/10 12:13:05]
+[DEBUG LevelSEGate gate_xyz] step=25000 per-level mean=['0.882', '0.883', '0.884', '0.884', '0.887', '0.883', '0.877', '0.885', '0.883', '0.880', '0.888', '0.891'] std=['0.000', '0.000', '0.000', '0.000', '0.001', '0.000', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 12:13:05]
+[DEBUG LevelSEGate gate_xy] step=25000 per-level mean=['0.876', '0.875', '0.877', '0.891'] std=['0.000', '0.001', '0.013', '0.008'] (init was a uniform 0.881 for every level) [16/10 12:13:05]
+[DEBUG LevelSEGate gate_xz] step=25000 per-level mean=['0.874', '0.880', '0.880', '0.884'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 12:13:05]
+[DEBUG LevelSEGate gate_yz] step=25000 per-level mean=['0.880', '0.883', '0.882', '0.884'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 12:13:05]
+[DEBUG Q_feat_adj] step=25000 no_cond: -0.3939/0.6640 cond: -0.2606/0.7819 Q_feat_if_cond: 0.8349 [16/10 12:13:06]
+[DEBUG Q_feat_prepass] step=26000 Q_feat_adj: -1.0491/0.3460 Q_feat: 0.2577 [16/10 12:25:59]
+[DEBUG LevelSEGate gate_xyz] step=26000 per-level mean=['0.882', '0.883', '0.884', '0.884', '0.887', '0.883', '0.877', '0.885', '0.883', '0.880', '0.888', '0.891'] std=['0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.001'] (init was a uniform 0.881 for every level) [16/10 12:25:59]
+[DEBUG LevelSEGate gate_xy] step=26000 per-level mean=['0.876', '0.875', '0.864', '0.883'] std=['0.000', '0.001', '0.013', '0.008'] (init was a uniform 0.881 for every level) [16/10 12:25:59]
+[DEBUG LevelSEGate gate_xz] step=26000 per-level mean=['0.875', '0.880', '0.879', '0.883'] std=['0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [16/10 12:25:59]
+[DEBUG LevelSEGate gate_yz] step=26000 per-level mean=['0.882', '0.883', '0.882', '0.881'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 12:25:59]
+[DEBUG Q_feat_adj] step=26000 no_cond: -0.4256/0.6499 cond: -0.2690/0.7802 Q_feat_if_cond: 0.8295 [16/10 12:26:00]
+[DEBUG Q_feat_prepass] step=27000 Q_feat_adj: -0.3795/0.6429 Q_feat: 0.7203 [16/10 12:38:52]
+[DEBUG LevelSEGate gate_xyz] step=27000 per-level mean=['0.881', '0.883', '0.883', '0.884', '0.887', '0.883', '0.876', '0.886', '0.883', '0.880', '0.888', '0.891'] std=['0.000', '0.000', '0.000', '0.001', '0.001', '0.001', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 12:38:52]
+2026-10-16 12:38:54,662 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 12:38:54,663 - INFO: 
+-----[ITER 27000] bits info (accurate): ttl_size_feat_MB=11.48509936593473, ttl_size_scaling_MB=3.2855704789981246, ttl_size_offsets_MB=4.7135999742895365, ttl_size_MB=19.48426981922239-----
+2026-10-16 12:38:54,663 - INFO: 
+-----[ITER 27000] bits info (approx from visible): bit_per_feat_param=2.76021146774292, ttl_size_feat_MB_approx=14.019397010986268-----
+2026-10-16 12:38:54,663 - INFO: 
+-----[ITER 27000] bits info: anchor_num=852132-----
+2026-10-16 12:38:54,663 - INFO: 
+-----[ITER 27000] bits info: 1_rate_mask=0.823433518409729, mask_numel=852132, mask_size_MB=0.06831856071949005-----
+2026-10-16 12:38:54,669 - INFO: 
+-----[ITER 27000] RENO anchor rate term: avg_bpp_per_anchor=21.0093 (raw=20.9987), anchor_count_soft=701674.0-----
+Training progress:  90%|████████▉ | 26900/30000 [3:55:26<39:47,  1.30it/s, Loss=0.0799676]Training progress:  90%|█████████ | 27000/30000 [3:55:26<38:43,  1.29it/s, Loss=0.0799676]2026-10-16 12:38:54,952 - INFO: [RENO] iter=27000 bpp=20.8921 anchor_num=20000
+Training progress:  90%|█████████ | 27000/30000 [3:56:42<38:43,  1.29it/s, Loss=0.0763447]Training progress:  90%|█████████ | 27100/30000 [3:56:42<37:16,  1.30it/s, Loss=0.0763447]Training progress:  90%|█████████ | 27100/30000 [3:57:59<37:16,  1.30it/s, Loss=0.0673045]Training progress:  91%|█████████ | 27200/30000 [3:57:59<36:01,  1.30it/s, Loss=0.0673045]2026-10-16 12:41:28,628 - INFO: [RENO] iter=27200 bpp=20.8914 anchor_num=20000
+Training progress:  91%|█████████ | 27200/30000 [3:59:16<36:01,  1.30it/s, Loss=0.0807466]Training progress:  91%|█████████ | 27300/30000 [3:59:16<34:41,  1.30it/s, Loss=0.0807466]Training progress:  91%|█████████ | 27300/30000 [4:00:33<34:41,  1.30it/s, Loss=0.0920428]Training progress:  91%|█████████▏| 27400/30000 [4:00:33<33:23,  1.30it/s, Loss=0.0920428]2026-10-16 12:44:02,540 - INFO: [RENO] iter=27400 bpp=21.0312 anchor_num=20000
+Training progress:  91%|█████████▏| 27400/30000 [4:01:50<33:23,  1.30it/s, Loss=0.0659025]Training progress:  92%|█████████▏| 27500/30000 [4:01:50<32:06,  1.30it/s, Loss=0.0659025]Training progress:  92%|█████████▏| 27500/30000 [4:03:07<32:06,  1.30it/s, Loss=0.0718813]Training progress:  92%|█████████▏| 27600/30000 [4:03:07<30:43,  1.30it/s, Loss=0.0718813]2026-10-16 12:46:35,780 - INFO: [RENO] iter=27600 bpp=21.0287 anchor_num=20000
+Training progress:  92%|█████████▏| 27600/30000 [4:04:23<30:43,  1.30it/s, Loss=0.0699377]Training progress:  92%|█████████▏| 27700/30000 [4:04:23<29:24,  1.30it/s, Loss=0.0699377]Training progress:  92%|█████████▏| 27700/30000 [4:05:40<29:24,  1.30it/s, Loss=0.0770335]Training progress:  93%|█████████▎| 27800/30000 [4:05:40<28:06,  1.30it/s, Loss=0.0770335]2026-10-16 12:49:08,841 - INFO: [RENO] iter=27800 bpp=20.9536 anchor_num=20000
+Training progress:  93%|█████████▎| 27800/30000 [4:06:56<28:06,  1.30it/s, Loss=0.0719675]Training progress:  93%|█████████▎| 27900/30000 [4:06:56<26:48,  1.31it/s, Loss=0.0719675]2026-10-16 12:51:43,546 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 12:51:43,546 - INFO: 
+-----[ITER 28000] bits info (accurate): ttl_size_feat_MB=11.527456542477012, ttl_size_scaling_MB=3.2922752127051353, ttl_size_offsets_MB=4.691186893731356, ttl_size_MB=19.510918648913503-----
+2026-10-16 12:51:43,546 - INFO: 
+-----[ITER 28000] bits info (approx from visible): bit_per_feat_param=2.7772140502929688, ttl_size_feat_MB_approx=14.105754870797682-----
+2026-10-16 12:51:43,546 - INFO: 
+-----[ITER 28000] bits info: anchor_num=852132-----
+2026-10-16 12:51:43,547 - INFO: 
+-----[ITER 28000] bits info: 1_rate_mask=0.8200396299362183, mask_numel=852132, mask_size_MB=0.06907863169908524-----
+2026-10-16 12:51:43,553 - INFO: 
+-----[ITER 28000] RENO anchor rate term: avg_bpp_per_anchor=20.9804 (raw=20.9161), anchor_count_soft=698782.0-----
+Training progress:  93%|█████████▎| 27900/30000 [4:08:15<26:48,  1.31it/s, Loss=0.0777571]Training progress:  93%|█████████▎| 28000/30000 [4:08:15<25:43,  1.30it/s, Loss=0.0777571]2026-10-16 12:51:43,864 - INFO: [RENO] iter=28000 bpp=21.0253 anchor_num=20000
+Training progress:  93%|█████████▎| 28000/30000 [4:09:31<25:43,  1.30it/s, Loss=0.0735362]Training progress:  94%|█████████▎| 28100/30000 [4:09:31<24:19,  1.30it/s, Loss=0.0735362]Training progress:  94%|█████████▎| 28100/30000 [4:10:47<24:19,  1.30it/s, Loss=0.1236995]Training progress:  94%|█████████▍| 28200/30000 [4:10:47<23:01,  1.30it/s, Loss=0.1236995]2026-10-16 12:54:16,426 - INFO: [RENO] iter=28200 bpp=20.9962 anchor_num=20000
+Training progress:  94%|█████████▍| 28200/30000 [4:12:04<23:01,  1.30it/s, Loss=0.0871572]Training progress:  94%|█████████▍| 28300/30000 [4:12:04<21:44,  1.30it/s, Loss=0.0871572]Training progress:  94%|█████████▍| 28300/30000 [4:13:20<21:44,  1.30it/s, Loss=0.1000655]Training progress:  95%|█████████▍| 28400/30000 [4:13:20<20:23,  1.31it/s, Loss=0.1000655]2026-10-16 12:56:49,040 - INFO: [RENO] iter=28400 bpp=20.9754 anchor_num=20000
+Training progress:  95%|█████████▍| 28400/30000 [4:14:36<20:23,  1.31it/s, Loss=0.1118249]Training progress:  95%|█████████▌| 28500/30000 [4:14:36<19:05,  1.31it/s, Loss=0.1118249]Training progress:  95%|█████████▌| 28500/30000 [4:15:52<19:05,  1.31it/s, Loss=0.0906763]Training progress:  95%|█████████▌| 28600/30000 [4:15:52<17:48,  1.31it/s, Loss=0.0906763]2026-10-16 12:59:21,247 - INFO: [RENO] iter=28600 bpp=20.9208 anchor_num=20000
+Training progress:  95%|█████████▌| 28600/30000 [4:17:08<17:48,  1.31it/s, Loss=0.0856988]Training progress:  96%|█████████▌| 28700/30000 [4:17:08<16:30,  1.31it/s, Loss=0.0856988]Training progress:  96%|█████████▌| 28700/30000 [4:18:25<16:30,  1.31it/s, Loss=0.0705141]Training progress:  96%|█████████▌| 28800/30000 [4:18:25<15:16,  1.31it/s, Loss=0.0705141]2026-10-16 13:01:53,912 - INFO: [RENO] iter=28800 bpp=20.9583 anchor_num=20000
+Training progress:  96%|█████████▌| 28800/30000 [4:19:41<15:16,  1.31it/s, Loss=0.0765679]Training progress:  96%|█████████▋| 28900/30000 [4:19:41<14:00,  1.31it/s, Loss=0.0765679]2026-10-16 13:04:27,938 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 13:04:27,938 - INFO: 
+-----[ITER 29000] bits info (accurate): ttl_size_feat_MB=11.25317047862336, ttl_size_scaling_MB=3.2449116557836533, ttl_size_offsets_MB=4.6790883871144615, ttl_size_MB=19.177170521521475-----
+2026-10-16 13:04:27,939 - INFO: 
+-----[ITER 29000] bits info (approx from visible): bit_per_feat_param=2.7081592082977295, ttl_size_feat_MB_approx=13.755018249065643-----
+2026-10-16 13:04:27,939 - INFO: 
+-----[ITER 29000] bits info: anchor_num=852132-----
+2026-10-16 13:04:27,939 - INFO: 
+-----[ITER 29000] bits info: 1_rate_mask=0.8171316385269165, mask_numel=852132, mask_size_MB=0.0697207897901535-----
+2026-10-16 13:04:27,945 - INFO: 
+-----[ITER 29000] RENO anchor rate term: avg_bpp_per_anchor=20.9532 (raw=20.9084), anchor_count_soft=696304.0-----
+Training progress:  96%|█████████▋| 28900/30000 [4:20:59<14:00,  1.31it/s, Loss=0.0786475]Training progress:  97%|█████████▋| 29000/30000 [4:20:59<12:48,  1.30it/s, Loss=0.0786475]2026-10-16 13:04:28,232 - INFO: [RENO] iter=29000 bpp=20.9945 anchor_num=20000
+Training progress:  97%|█████████▋| 29000/30000 [4:22:15<12:48,  1.30it/s, Loss=0.0702314]Training progress:  97%|█████████▋| 29100/30000 [4:22:15<11:29,  1.31it/s, Loss=0.0702314]Training progress:  97%|█████████▋| 29100/30000 [4:23:32<11:29,  1.31it/s, Loss=0.1082157]Training progress:  97%|█████████▋| 29200/30000 [4:23:32<10:13,  1.30it/s, Loss=0.1082157]2026-10-16 13:07:01,229 - INFO: [RENO] iter=29200 bpp=20.9111 anchor_num=20000
+Training progress:  97%|█████████▋| 29200/30000 [4:24:48<10:13,  1.30it/s, Loss=0.0682816]Training progress:  98%|█████████▊| 29300/30000 [4:24:48<08:54,  1.31it/s, Loss=0.0682816]Training progress:  98%|█████████▊| 29300/30000 [4:26:04<08:54,  1.31it/s, Loss=0.1115138]Training progress:  98%|█████████▊| 29400/30000 [4:26:04<07:38,  1.31it/s, Loss=0.1115138]2026-10-16 13:09:33,255 - INFO: [RENO] iter=29400 bpp=20.8907 anchor_num=20000
+Training progress:  98%|█████████▊| 29400/30000 [4:27:20<07:38,  1.31it/s, Loss=0.0744483]Training progress:  98%|█████████▊| 29500/30000 [4:27:20<06:21,  1.31it/s, Loss=0.0744483]Training progress:  98%|█████████▊| 29500/30000 [4:28:36<06:21,  1.31it/s, Loss=0.0903180]Training progress:  99%|█████████▊| 29600/30000 [4:28:36<05:04,  1.31it/s, Loss=0.0903180]2026-10-16 13:12:05,169 - INFO: [RENO] iter=29600 bpp=20.8745 anchor_num=20000
+Training progress:  99%|█████████▊| 29600/30000 [4:29:53<05:04,  1.31it/s, Loss=0.1130446]Training progress:  99%|█████████▉| 29700/30000 [4:29:53<03:48,  1.31it/s, Loss=0.1130446]Training progress:  99%|█████████▉| 29700/30000 [4:31:09<03:48,  1.31it/s, Loss=0.0842155]Training progress:  99%|█████████▉| 29800/30000 [4:31:09<02:32,  1.31it/s, Loss=0.0842155]2026-10-16 13:14:38,256 - INFO: [RENO] iter=29800 bpp=20.9326 anchor_num=20000
+Training progress:  99%|█████████▉| 29800/30000 [4:32:25<02:32,  1.31it/s, Loss=0.0744132]Training progress: 100%|█████████▉| 29900/30000 [4:32:25<01:16,  1.31it/s, Loss=0.0744132]2026-10-16 13:17:12,391 - INFO: 
+----------------------------------------------------------------------------------------
+2026-10-16 13:17:12,392 - INFO: 
+-----[ITER 30000] bits info (accurate): ttl_size_feat_MB=11.428358409553766, ttl_size_scaling_MB=3.2523436048068106, ttl_size_offsets_MB=4.623546422924846, ttl_size_MB=19.304248437285423-----
+2026-10-16 13:17:12,392 - INFO: 
+-----[ITER 30000] bits info (approx from visible): bit_per_feat_param=2.7631659507751465, ttl_size_feat_MB_approx=14.034403133189244-----
+2026-10-16 13:17:12,392 - INFO: 
+-----[ITER 30000] bits info: anchor_num=852132-----
+2026-10-16 13:17:12,392 - INFO: 
+-----[ITER 30000] bits info: 1_rate_mask=0.8147012591362, mask_numel=852132, mask_size_MB=0.07025110721588135-----
+2026-10-16 13:17:12,398 - INFO: 
+-----[ITER 30000] RENO anchor rate term: avg_bpp_per_anchor=20.9315 (raw=20.9563), anchor_count_soft=694233.0-----
+Training progress: 100%|█████████▉| 29900/30000 [4:33:44<01:16,  1.31it/s, Loss=0.0682933]Training progress: 100%|██████████| 30000/30000 [4:33:44<00:00,  1.30it/s, Loss=0.0682933]Training progress: 100%|██████████| 30000/30000 [4:33:44<00:00,  1.83it/s, Loss=0.0682933]
+[DEBUG LevelSEGate gate_xy] step=27000 per-level mean=['0.875', '0.875', '0.881', '0.894'] std=['0.001', '0.001', '0.011', '0.007'] (init was a uniform 0.881 for every level) [16/10 12:38:52]
+[DEBUG LevelSEGate gate_xz] step=27000 per-level mean=['0.873', '0.880', '0.881', '0.884'] std=['0.001', '0.000', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 12:38:52]
+[DEBUG LevelSEGate gate_yz] step=27000 per-level mean=['0.879', '0.882', '0.882', '0.885'] std=['0.002', '0.001', '0.001', '0.002'] (init was a uniform 0.881 for every level) [16/10 12:38:52]
+[DEBUG Q_feat_adj] step=27000 no_cond: -0.4417/0.6473 cond: -0.3314/0.7926 Q_feat_if_cond: 0.7903 [16/10 12:38:52]
+[DEBUG Q_feat_prepass] step=28000 Q_feat_adj: -1.1126/0.3486 Q_feat: 0.2343 [16/10 12:51:41]
+[DEBUG LevelSEGate gate_xyz] step=28000 per-level mean=['0.881', '0.883', '0.883', '0.884', '0.886', '0.883', '0.877', '0.885', '0.883', '0.880', '0.887', '0.891'] std=['0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.001'] (init was a uniform 0.881 for every level) [16/10 12:51:41]
+[DEBUG LevelSEGate gate_xy] step=28000 per-level mean=['0.876', '0.875', '0.862', '0.882'] std=['0.000', '0.001', '0.013', '0.007'] (init was a uniform 0.881 for every level) [16/10 12:51:41]
+[DEBUG LevelSEGate gate_xz] step=28000 per-level mean=['0.875', '0.880', '0.878', '0.883'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 12:51:41]
+[DEBUG LevelSEGate gate_yz] step=28000 per-level mean=['0.882', '0.883', '0.882', '0.881'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 12:51:41]
+[DEBUG Q_feat_adj] step=28000 no_cond: -0.4573/0.6349 cond: -0.3411/0.8163 Q_feat_if_cond: 0.7890 [16/10 12:51:41]
+[DEBUG Q_feat_prepass] step=29000 Q_feat_adj: -0.6011/0.5795 Q_feat: 0.5455 [16/10 13:04:25]
+[DEBUG LevelSEGate gate_xyz] step=29000 per-level mean=['0.880', '0.883', '0.883', '0.883', '0.886', '0.883', '0.877', '0.885', '0.882', '0.881', '0.888', '0.891'] std=['0.000', '0.000', '0.000', '0.001', '0.001', '0.000', '0.001', '0.001', '0.000', '0.000', '0.001', '0.001'] (init was a uniform 0.881 for every level) [16/10 13:04:25]
+[DEBUG LevelSEGate gate_xy] step=29000 per-level mean=['0.875', '0.875', '0.878', '0.892'] std=['0.001', '0.001', '0.012', '0.007'] (init was a uniform 0.881 for every level) [16/10 13:04:25]
+[DEBUG LevelSEGate gate_xz] step=29000 per-level mean=['0.874', '0.880', '0.881', '0.884'] std=['0.001', '0.001', '0.002', '0.002'] (init was a uniform 0.881 for every level) [16/10 13:04:25]
+[DEBUG LevelSEGate gate_yz] step=29000 per-level mean=['0.880', '0.882', '0.882', '0.884'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 13:04:25]
+[DEBUG Q_feat_adj] step=29000 no_cond: -0.4105/0.6348 cond: -0.3071/0.7819 Q_feat_if_cond: 0.8059 [16/10 13:04:25]
+[DEBUG Q_feat_prepass] step=30000 Q_feat_adj: -1.1121/0.3496 Q_feat: 0.2349 [16/10 13:17:10]
+[DEBUG LevelSEGate gate_xyz] step=30000 per-level mean=['0.881', '0.883', '0.883', '0.884', '0.887', '0.883', '0.877', '0.885', '0.883', '0.880', '0.888', '0.891'] std=['0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.000', '0.001'] (init was a uniform 0.881 for every level) [16/10 13:17:10]
+[DEBUG LevelSEGate gate_xy] step=30000 per-level mean=['0.875', '0.874', '0.860', '0.881'] std=['0.000', '0.001', '0.011', '0.006'] (init was a uniform 0.881 for every level) [16/10 13:17:10]
+[DEBUG LevelSEGate gate_xz] step=30000 per-level mean=['0.875', '0.880', '0.878', '0.883'] std=['0.001', '0.001', '0.002', '0.001'] (init was a uniform 0.881 for every level) [16/10 13:17:10]
+[DEBUG LevelSEGate gate_yz] step=30000 per-level mean=['0.882', '0.883', '0.882', '0.881'] std=['0.002', '0.001', '0.001', '0.003'] (init was a uniform 0.881 for every level) [16/10 13:17:10]
+[DEBUG Q_feat_adj] step=30000 no_cond: -0.4471/0.6272 cond: -0.3229/0.7950 Q_feat_if_cond: 0.7986 [16/10 13:17:10]
+[DEBUG2 estimate_final_bits] hash_feats: -0.1499/0.6633 causal_ctx: -0.1501/0.6220 grid_scaling: 0.0249/0.0954 offsets_full: 0.0102/0.9238 hash_feats_cond: 0.0098/1.0335 feat_ctx_wso: 0.0020/1.2368 N_anchor=694233 [16/10 13:17:13]
+[DEBUG estimate_final_bits] mean: 0.0078/0.3203 scale: 0.0856/0.2473 prob: -0.0454/0.1863 Q_feat: 0.668577/0.468364 min=0.003461 max=1.972528 feat: -0.0117/1.4591 N=694233 [16/10 13:17:13]
+ninja: no work to do.
+2026-10-16 13:17:14,883 - INFO: 
+Estimated sizes in MB: anchor 1.1371, feat 11.4284, scaling 3.2524, offsets 4.6235, hash 0.1295, masks 0.7154, MLPs 1.4661, Total 22.7524
+2026-10-16 13:17:41,542 - INFO: 
+Encoded sizes in MB: anchor 1.1377, feat 11.4656, scaling 3.2652, offsets 4.6429, hash 0.1303, masks 0.7184, MLPs 1.4661, Total 22.8263, EncTime 26.656
+Encoded time in s: anchor 0.7388, feat 15.1601, scaling 4.4878, offsets 4.5287, hash 0.0142, masks 0.014, Total 26.656
+2026-10-16 13:18:34,869 - INFO: 
+DecTime 53.3219
+Decoded time in s: anchor 0.7249, feat 29.3206, scaling 11.646, offsets 10.0087, hash 0.0148, masks 0.0169, Total 53.3219
+2026-10-16 13:18:38,370 - INFO: 
+[ITER 30000] Evaluating test: L1 0.03897291675209999 PSNR 25.12300964355469 ssim 0.7408200359344482 lpips 0.27052978992462157
+2026-10-16 13:18:38,370 - INFO: Test FPS: 74.78429
+2026-10-16 13:18:39,046 - INFO: 
+[ITER 30000] Evaluating train: L1 0.04011039435863495 PSNR 22.32384834289551 ssim 0.7484714508056641 lpips 0.2905661463737488
+2026-10-16 13:18:39,046 - INFO: Test FPS: 85.72400
+2026-10-16 13:18:39,060 - INFO: 
+[ITER 30000] Saving Gaussians
+2026-10-16 13:18:44,882 - INFO: [RENO] iter=30000 bpp=20.9663 anchor_num=20000
+2026-10-16 13:18:44,882 - INFO: 
+ Total Training time: 16423.519542217255
+2026-10-16 13:18:44,884 - INFO: [RENO] Saved adapted weights to outputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/mipnerf360/bicycle/lambda_0.001/reno_adapted.pt
+2026-10-16 13:18:44,889 - INFO: 
+Training complete.
+2026-10-16 13:18:44,890 - INFO: 
+Starting Rendering~
+9538576 95868064.0 27282926.0 38785120.0 1086372.0 6001111.0 [16/10 13:17:14]
+Start encoding ... [16/10 13:17:14]
+[RENO] compress_reno breakdown (s): setup=0.0002, fog=0.0265, prior=0.0753, fcg=0.0417, target=0.0941, pred_head=0.0340, cdf_prep=0.1234, torchac_enc=0.2672, pack_io=0.0015, total=0.6639 [16/10 13:17:15]
+[DEBUG2 conduct_encoding] hash_feats: -0.1499/0.6633 causal_ctx: -0.1501/0.6220 N_anchor=694233 [16/10 13:17:16]
+[DEBUG conduct_encoding] mean: 0.0078/0.3203 scale: 0.0856/0.2473 prob: -0.0454/0.1863 Q_feat: 0.668577/0.468364 min=0.003461 max=1.972528 feat: -0.0117/1.4591 N=34711650 [16/10 13:17:41]
+[DEBUG2 conduct_encoding] scaling_for_cond: 0.0249/0.0954 offsets_for_cond: 0.0102/0.9238 hash_feats_cond: 0.0098/1.0335 feat_context: 0.0020/1.2368 [16/10 13:17:41]
+encoding time: 26.655981302261353 [16/10 13:17:41]
+codec time: 24.08540415763855 [16/10 13:17:41]
+Start decoding ... [16/10 13:17:41]
+[RENO] decompress_reno breakdown (s): header_io=0.0004, prior=0.0751, fcg=0.0440, target=0.0936, pred_head=0.0339, cdf_prep=0.1105, torchac_dec=0.3417, total=0.6993 [16/10 13:17:42]
+decoding time: 53.32190561294556 [16/10 13:18:34]
+Start replacing parameters with decoded ones... [16/10 13:18:34]
+Parameters are successfully replaced by decoded ones! [16/10 13:18:34]
+hash_params: True 4 13 (18, 24, 33, 44, 59, 80, 108, 148, 201, 275, 376, 514) 15 (130, 258, 514, 1026) True False False plane_fusion= concat use_level_gate= True [16/10 13:18:44]
+encoding_param_num=1766674, size=0.21060395240783691MB. [16/10 13:18:44]
+Loading trained model at iteration 30000 [16/10 13:18:44]
+Reading camera 1/194Reading camera 2/194Reading camera 3/194Reading camera 4/194Reading camera 5/194Reading camera 6/194Reading camera 7/194Reading camera 8/194Reading camera 9/194Reading camera 10/194Reading camera 11/194Reading camera 12/194Reading camera 13/194Reading camera 14/194Reading camera 15/194Reading camera 16/194Reading camera 17/194Reading camera 18/194Reading camera 19/194Reading camera 20/194Reading camera 21/194Reading camera 22/194Reading camera 23/194Reading camera 24/194Reading camera 25/194Reading camera 26/194Reading camera 27/194Reading camera 28/194Reading camera 29/194Reading camera 30/194Reading camera 31/194Reading camera 32/194Reading camera 33/194Reading camera 34/194Reading camera 35/194Reading camera 36/194Reading camera 37/194Reading camera 38/194Reading camera 39/194Reading camera 40/194Reading camera 41/194Reading camera 42/194Reading camera 43/194Reading camera 44/194Reading camera 45/194Reading camera 46/194Reading camera 47/194Reading camera 48/194Reading camera 49/194Reading camera 50/194Reading camera 51/194Reading camera 52/194Reading camera 53/194Reading camera 54/194Reading camera 55/194Reading camera 56/194Reading camera 57/194Reading camera 58/194Reading camera 59/194Reading camera 60/194Reading camera 61/194Reading camera 62/194Reading camera 63/194Reading camera 64/194Reading camera 65/194Reading camera 66/194Reading camera 67/194Reading camera 68/194Reading camera 69/194Reading camera 70/194Reading camera 71/194Reading camera 72/194Reading camera 73/194Reading camera 74/194Reading camera 75/194Reading camera 76/194Reading camera 77/194Reading camera 78/194Reading camera 79/194Reading camera 80/194Reading camera 81/194Reading camera 82/194Reading camera 83/194Reading camera 84/194Reading camera 85/194Reading camera 86/194Reading camera 87/194Reading camera 88/194Reading camera 89/194Reading camera 90/194Reading camera 91/194Reading camera 92/194Reading camera 93/194Reading camera 94/194Reading camera 95/194Reading camera 96/194Reading camera 97/194Reading camera 98/194Reading camera 99/194Reading camera 100/194Reading camera 101/194Reading camera 102/194Reading camera 103/194Reading camera 104/194Reading camera 105/194Reading camera 106/194Reading camera 107/194Reading camera 108/194Reading camera 109/194Reading camera 110/194Reading camera 111/194Reading camera 112/194Reading camera 113/194Reading camera 114/194Reading camera 115/194Reading camera 116/194Reading camera 117/194Reading camera 118/194Reading camera 119/194Reading camera 120/194Reading camera 121/194Reading camera 122/194Reading camera 123/194Reading camera 124/194Reading camera 125/194Reading camera 126/194Reading camera 127/194Reading camera 128/194Reading camera 129/194Reading camera 130/194Reading camera 131/194Reading camera 132/194Reading camera 133/194Reading camera 134/194Reading camera 135/194Reading camera 136/194Reading camera 137/194Reading camera 138/194Reading camera 139/194Reading camera 140/194Reading camera 141/194Reading camera 142/194Reading camera 143/194Reading camera 144/194Reading camera 145/194Reading camera 146/194Reading camera 147/194Reading camera 148/194Reading camera 149/194Reading camera 150/194Reading camera 151/194Reading camera 152/194Reading camera 153/194Reading camera 154/194Reading camera 155/194Reading camera 156/194Reading camera 157/194Reading camera 158/194Reading camera 159/194Reading camera 160/194Reading camera 161/194Reading camera 162/194Reading camera 163/194Reading camera 164/194Reading camera 165/194Reading camera 166/194Reading camera 167/194Reading camera 168/194Reading camera 169/194Reading camera 170/194Reading camera 171/194Reading camera 172/194Reading camera 173/194Reading camera 174/194Reading camera 175/194Reading camera 176/194Reading camera 177/194Reading camera 178/194Reading camera 179/194Reading camera 180/194Reading camera 181/194Reading camera 182/194Reading camera 183/194Reading camera 184/194Reading camera 185/194Reading camera 186/194Reading camera 187/194Reading camera 188/194Reading camera 189/194Reading camera 190/194Reading camera 191/194Reading camera 192/194Reading camera 193/194Reading camera 194/194 [16/10 13:18:45]
+start fetching data from ply file [16/10 13:18:45]
+Loading Training Cameras [16/10 13:18:45]
+Loading Test Cameras [16/10 13:19:18]
+Rendering progress:   0%|          | 0/25 [00:00<?, ?it/s]Rendering progress:   4%|▍         | 1/25 [00:01<00:30,  1.25s/it]Rendering progress:   8%|▊         | 2/25 [00:02<00:29,  1.26s/it]Rendering progress:  12%|█▏        | 3/25 [00:03<00:27,  1.27s/it]Rendering progress:  16%|█▌        | 4/25 [00:05<00:27,  1.30s/it]Rendering progress:  20%|██        | 5/25 [00:06<00:26,  1.31s/it]Rendering progress:  24%|██▍       | 6/25 [00:07<00:25,  1.32s/it]Rendering progress:  28%|██▊       | 7/25 [00:09<00:24,  1.34s/it]Rendering progress:  32%|███▏      | 8/25 [00:10<00:22,  1.34s/it]Rendering progress:  36%|███▌      | 9/25 [00:11<00:21,  1.36s/it]Rendering progress:  40%|████      | 10/25 [00:13<00:20,  1.38s/it]Rendering progress:  44%|████▍     | 11/25 [00:14<00:19,  1.41s/it]Rendering progress:  48%|████▊     | 12/25 [00:16<00:18,  1.39s/it]Rendering progress:  52%|█████▏    | 13/25 [00:17<00:16,  1.40s/it]Rendering progress:  56%|█████▌    | 14/25 [00:19<00:15,  1.40s/it]Rendering progress:  60%|██████    | 15/25 [00:20<00:14,  1.41s/it]Rendering progress:  64%|██████▍   | 16/25 [00:21<00:13,  1.44s/it]Rendering progress:  68%|██████▊   | 17/25 [00:23<00:11,  1.45s/it]Rendering progress:  72%|███████▏  | 18/25 [00:24<00:09,  1.42s/it]Rendering progress:  76%|███████▌  | 19/25 [00:26<00:08,  1.43s/it]Rendering progress:  80%|████████  | 20/25 [00:27<00:07,  1.48s/it]Rendering progress:  84%|████████▍ | 21/25 [00:29<00:05,  1.49s/it]Rendering progress:  88%|████████▊ | 22/25 [00:30<00:04,  1.48s/it]Rendering progress:  92%|█████████▏| 23/25 [00:32<00:02,  1.48s/it]Rendering progress:  96%|█████████▌| 24/25 [00:33<00:01,  1.43s/it]Rendering progress: 100%|██████████| 25/25 [00:35<00:00,  1.43s/it]Rendering progress: 100%|██████████| 25/25 [00:35<00:00,  1.40s/it]
+2026-10-16 13:20:00,247 - INFO: Test FPS: [1;35m73.63673[0m
+2026-10-16 13:20:00,248 - INFO: 
+Rendering complete.
+2026-10-16 13:20:00,249 - INFO: 
+ Starting evaluation...
+testing_float_psnr=: tensor(25.1230, device='cuda:0', dtype=torch.float64) [16/10 13:20:00]
+ [16/10 13:20:00]
+Metric evaluation progress:   0%|          | 0/25 [00:00<?, ?it/s]Metric evaluation progress:   8%|▊         | 2/25 [00:00<00:01, 16.60it/s]Metric evaluation progress:  16%|█▌        | 4/25 [00:00<00:01, 10.91it/s]Metric evaluation progress:  24%|██▍       | 6/25 [00:00<00:01,  9.97it/s]Metric evaluation progress:  32%|███▏      | 8/25 [00:00<00:01,  9.57it/s]Metric evaluation progress:  40%|████      | 10/25 [00:01<00:01,  9.36it/s]Metric evaluation progress:  44%|████▍     | 11/25 [00:01<00:01,  9.28it/s]Metric evaluation progress:  48%|████▊     | 12/25 [00:01<00:01,  9.20it/s]Metric evaluation progress:  52%|█████▏    | 13/25 [00:01<00:01,  9.15it/s]Metric evaluation progress:  56%|█████▌    | 14/25 [00:01<00:01,  9.13it/s]Metric evaluation progress:  60%|██████    | 15/25 [00:01<00:01,  9.10it/s]Metric evaluation progress:  64%|██████▍   | 16/25 [00:01<00:00,  9.06it/s]Metric evaluation progress:  68%|██████▊   | 17/25 [00:01<00:00,  9.04it/s]Metric evaluation progress:  72%|███████▏  | 18/25 [00:01<00:00,  9.03it/s]Metric evaluation progress:  76%|███████▌  | 19/25 [00:02<00:00,  9.03it/s]Metric evaluation progress:  80%|████████  | 20/25 [00:02<00:00,  9.01it/s]Metric evaluation progress:  84%|████████▍ | 21/25 [00:02<00:00,  9.00it/s]Metric evaluation progress:  88%|████████▊ | 22/25 [00:02<00:00,  8.98it/s]Metric evaluation progress:  92%|█████████▏| 23/25 [00:02<00:00,  9.00it/s]Metric evaluation progress:  96%|█████████▌| 24/25 [00:02<00:00,  9.00it/s]Metric evaluation progress: 100%|██████████| 25/25 [00:02<00:00,  8.99it/s]Metric evaluation progress: 100%|██████████| 25/25 [00:02<00:00,  9.32it/s]
+2026-10-16 13:20:05,070 - INFO: model_paths: [1;35moutputs/experiments/shrunk_causalknn_bungee_mip360_2026-10-15_07-09-07/mipnerf360/bicycle/lambda_0.001[0m
+2026-10-16 13:20:05,178 - INFO:   SSIM : [1;35m   0.7404992[0m
+2026-10-16 13:20:05,178 - INFO:   PSNR : [1;35m  25.1122246[0m
+2026-10-16 13:20:05,178 - INFO:   LPIPS: [1;35m   0.2701497[0m
+2026-10-16 13:20:05,180 - INFO: 
+Evaluating complete.
+ [16/10 13:20:05]

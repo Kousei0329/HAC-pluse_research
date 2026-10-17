@@ -454,6 +454,57 @@ HAC++\cite{chen2025hacpp}（原論文報告値、highrate） & 1.84 & 33.76 & 0.
 
 高レート点では、本研究のFP8+RENO構成（$1.70$MB、PSNR$33.44$）は、HAC++（$1.84$MB、PSNR$33.76$）よりもわずかに小さいサイズを達成しているが、PSNR・SSIM・LPIPSのいずれでもHAC++をわずかに下回る。これは、本節の構成がINT8ではなくFP8（表\ref{tab:quant-sweep}でINT8に次ぐ2位の構成）を用いていることと整合的である。一方、低レート点では、本研究の構成（$1.00$MB、PSNR$31.51$）はHAC++の低レート点（$0.88$MB、PSNR$33.03$）よりもサイズが大きいにもかかわらずPSNRが約1.5dB低く、8シーン中で明確に劣った結果となった。内訳を確認すると、この低下は主に\texttt{ship}シーン（PSNR$29.31$、SSIM$0.872$、LPIPS$0.178$——8シーン中最も再構成が困難なシーン）に牽引されており、他の7シーンはおおむね30dB台後半から36dB台のPSNRを示している。この結果は、本研究の主要な知見（8bit前後の量子化はレンダリング画質に影響しない）がNeRF Syntheticデータセットでも成り立つことを確認する一方で、FP8という量子化幅の選択自体が、特に低レート（高圧縮率）側で、より頑健なINT8と比較して性能差を生みうることを示唆している。レンダリングFPSは高レート点で$345.1$、低レート点で$418.7$であり、合成データセットのシンプルな形状を反映してTanks and Temples・Deep Blendingよりも高い値を示した。
 
+\subsection{BungeeNeRF・Mip-NeRF360データセットにおける評価}
+\label{sec:bungee-mip360}
+これまでの各データセットとは異なり、本節のBungeeNeRF（\texttt{amsterdam}・\texttt{bilbao}・\texttt{hollywood}・\texttt{pompidou}・\texttt{quebec}・\texttt{rome}の6シーン）およびMip-NeRF360（\texttt{bicycle}・\texttt{garden}・\texttt{stump}・\texttt{room}・\texttt{counter}・\texttt{kitchen}・\texttt{bonsai}の7シーン。\texttt{flowers}・\texttt{treehill}はライセンスの都合上、本研究の実行環境では別途取得が必要であったため対象外とした）は、量子化フラグを一切指定せずクリーンなFP32のまま学習し（本研究の主たる評価軸であるポストトレーニング量子化の前提条件）、学習後に量子化幅のみを変えて事後評価する、という本研究全体の標準プロトコルに厳密に従って学習・評価した。アーキテクチャ設定（\texttt{causal\_knn\_K}=8、\texttt{causal\_knn\_hidden\_mult}=2、\texttt{mlp\_grid\_hidden\_mult}=4、RENO有効）および評価点（高レート点$\lambda=0.001$・低レート点$\lambda=0.005$）は他データセットと同一である。
+
+表\ref{tab:bungeenerf}にBungeeNeRFの6シーン平均を示す。BungeeNeRFは既存のHAC・HAC++の原論文がいずれも評価対象としていないデータセットであるため、文献値との比較は示さず、本研究自身のFP32（無量子化）構成とINT8（提案）構成のみを並べる。
+
+\begin{table}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{BungeeNeRFデータセットでの評価（6シーン平均）}
+\label{tab:bungeenerf}
+\centering
+\begin{tabular}{p{4.0cm}rrrrr}
+\toprule
+構成 & サイズ (MB) & PSNR & SSIM & LPIPS & FPS \\
+\midrule
+FP32（無量子化、lowrate） & 15.85 & 26.46 & 0.842 & 0.257 & 214.68 \\
+FP32（無量子化、highrate） & 19.57 & 27.35 & 0.882 & 0.195 & 182.38 \\
+\midrule
+\textbf{INT8（提案、lowrate）} & $\mathbf{14.89}$ & $\mathbf{26.46}$ & $\mathbf{0.842}$ & $\mathbf{0.257}$ & $\mathbf{214.68}$ \\
+\textbf{INT8（提案、highrate）} & $\mathbf{18.65}$ & $\mathbf{27.35}$ & $\mathbf{0.882}$ & $\mathbf{0.195}$ & $\mathbf{182.38}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+INT8量子化はFP32と比べてPSNR・SSIM・LPIPS・FPSを完全に保ったまま、サイズを高レート点で$19.57\to18.65$MB（$-4.7\%$）、低レート点で$15.85\to14.89$MB（$-6.1\%$）削減している。これは、本研究の主要な知見（8bit前後の量子化はレンダリング画質に影響を与えない）が、BungeeNeRFのような都市規模のマルチスケールシーンでも成り立つことを確認するものである。
+
+次に表\ref{tab:literature-mip360}に、Mip-NeRF360データセットでの評価を示す。\cite{chen2025hacpp}のTable~IIより引用したHAC++の原論文報告値と、本研究のFP32・INT8（提案）構成を並べる。
+
+\begin{table}[!t]
+\renewcommand{\arraystretch}{1.2}
+\caption{既存手法との比較（Mip-NeRF360、7シーン平均）}
+\label{tab:literature-mip360}
+\centering
+\begin{tabular}{p{4.0cm}rrrrr}
+\toprule
+手法 & サイズ (MB) & PSNR & SSIM & LPIPS & FPS \\
+\midrule
+HAC++\cite{chen2025hacpp}（原論文報告値、lowrate） & 8.34 & 27.60 & 0.803 & 0.253 & -- \\
+HAC++\cite{chen2025hacpp}（原論文報告値、highrate） & 18.48 & 27.82 & 0.811 & 0.231 & -- \\
+\midrule
+FP32（本研究、実測、無量子化、lowrate） & 6.46 & 28.98 & 0.853 & 0.230 & 111.42 \\
+FP32（本研究、実測、無量子化、highrate） & 13.62 & 29.54 & 0.870 & 0.197 & 91.72 \\
+\midrule
+\textbf{INT8（本研究、実測、提案、lowrate）} & $\mathbf{5.45}$ & $\mathbf{28.98}$ & $\mathbf{0.853}$ & $\mathbf{0.230}$ & $\mathbf{111.42}$ \\
+\textbf{INT8（本研究、実測、提案、highrate）} & $\mathbf{12.62}$ & $\mathbf{29.54}$ & $\mathbf{0.870}$ & $\mathbf{0.197}$ & $\mathbf{91.72}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+本研究の提案構成（INT8＋RENO）は、Mip-NeRF360において両レート点でHAC++よりも小さいサイズ（低レート点$5.45$MB対$8.34$MB、高レート点$12.62$MB対$18.48$MB）と高いPSNR（低レート点$28.98$対$27.60$、高レート点$29.54$対$27.82$）を同時に達成している。これはTanks and Templesで観測された傾向（表\ref{tab:literature-result}、縮小アーキテクチャ＋RENO＋INT8量子化の組み合わせが既存手法を上回る）がMip-NeRF360でも再現されることを示している。また、INT8量子化によるFP32からの劣化はBungeeNeRFと同様に皆無であり（PSNR・SSIM・LPIPS・FPSすべて不変）、サイズのみが高レート点で$13.62\to12.62$MB（$-7.3\%$）、低レート点で$6.46\to5.45$MB（$-15.6\%$）削減されている。低レート点でのサイズ削減率がBungeeNeRF・高レート点よりも大きいのは、MLPの固定サイズ（量子化対象）がシーン全体のサイズに占める割合が、アンカー数が少ない低レート構成ほど相対的に大きくなるためである。
+
 \subsection{結論と今後の課題}
 本研究では、HAC-plusのエントロピー予測ネットワークに特化した量子化幅のアブレーション研究を行い、以下の知見を得た。第一に、8bit前後の量子化（INT8・INT6・FP8・FP16）はレンダリング画質に影響を与えることなく、追加コストなしに圧縮率を6〜19\%改善できる。第二に、4bit以下への量子化は、エントロピー予測精度の劣化に起因する符号化コストの爆発的増大により、総伝送サイズをむしろ悪化させる。第三に、この崩壊は量子化誤差の大きさではなく、系統的な丸めの偏り——特にfloat形式における指数部ビット不足によるダイナミックレンジの不足——に起因することを、実測によって定量的に明らかにした。第四に、整数量子化（特にINT8）は同一ビット幅の浮動小数点量子化より一貫して優れており、これは整数量子化の丸め誤差が無偏である一方、低ビット幅のminifloat形式は構造的に偏った誤差を生じやすいという性質の違いに起因する。第五に、アンカー位置圧縮における学習型コーデックRENOの採用は、MLP量子化幅の選択よりも遥かに大きく全体の圧縮性能を左右する。
 

@@ -1,0 +1,782 @@
+[
+  {
+    "dataset": "bungeenerf",
+    "scene": "amsterdam",
+    "lambda": 0.001,
+    "fps": 127.2125,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 23.7522,
+      "psnr": 27.496441748834425,
+      "ssim": 0.9006405242027775,
+      "lpips": 0.16895283422162455,
+      "l1": 0.02236034640020901,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 13.052, scaling 3.2111, offsets 5.2173, hash 0.1562, masks 0.6493, MLPs 1.4661, Total 23.7522"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 22.8318,
+      "psnr": 27.496441748834425,
+      "ssim": 0.9006405242027775,
+      "lpips": 0.16895283422162455,
+      "l1": 0.02236034640020901,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 13.0753, scaling 3.2877, offsets 5.216, hash 0.1562, masks 0.6493, MLPs 0.4471, Total 22.8318"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "amsterdam",
+    "lambda": 0.005,
+    "fps": 150.83209,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 53.828,
+      "psnr": 26.576337937385805,
+      "ssim": 0.8523109805199408,
+      "lpips": 0.24959041274362995,
+      "l1": 0.027124658587478822,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 48.6476, scaling 1.7005, offsets 1.5773, hash 0.1266, masks 0.3098, MLPs 1.4661, Total 53.828"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 53.0109,
+      "psnr": 26.576337937385805,
+      "ssim": 0.8523109805199408,
+      "lpips": 0.24959041274362995,
+      "l1": 0.027124658587478822,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 48.6476, scaling 1.9018, offsets 1.5778, hash 0.1266, masks 0.3098, MLPs 0.4471, Total 53.0109"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "bilbao",
+    "lambda": 0.001,
+    "fps": 207.76778,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 18.1358,
+      "psnr": 28.33993124192761,
+      "ssim": 0.8967190115682541,
+      "lpips": 0.1675731102305074,
+      "l1": 0.020663294941186905,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 9.6853, scaling 2.2977, offsets 4.0183, hash 0.1629, masks 0.5053, MLPs 1.4661, Total 18.1358"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 17.1633,
+      "psnr": 28.33993124192761,
+      "ssim": 0.8967190115682541,
+      "lpips": 0.1675731102305074,
+      "l1": 0.020663294941186905,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 9.6951, scaling 2.3309, offsets 4.0219, hash 0.1629, masks 0.5053, MLPs 0.4471, Total 17.1633"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "bilbao",
+    "lambda": 0.005,
+    "fps": 252.5168,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 7.5854,
+      "psnr": 27.695216640349358,
+      "ssim": 0.8671790072994847,
+      "lpips": 0.22987300397888308,
+      "l1": 0.023867674292095246,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.2387, scaling 1.2644, offsets 1.2263, hash 0.1342, masks 0.2557, MLPs 1.4661, Total 7.5854"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 6.6576,
+      "psnr": 27.695216640349358,
+      "ssim": 0.8671790072994847,
+      "lpips": 0.22987300397888308,
+      "l1": 0.023867674292095246,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.2482, scaling 1.3464, offsets 1.2259, hash 0.1342, masks 0.2557, MLPs 0.4471, Total 6.6576"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "hollywood",
+    "lambda": 0.001,
+    "fps": 188.94701,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 18.921,
+      "psnr": 24.930403678647934,
+      "ssim": 0.7999800847422692,
+      "lpips": 0.28262953027602167,
+      "l1": 0.03691717892164184,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 10.2095, scaling 2.3211, offsets 4.3012, hash 0.1358, masks 0.4871, MLPs 1.4661, Total 18.921"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 17.9488,
+      "psnr": 24.930403678647934,
+      "ssim": 0.7999800847422692,
+      "lpips": 0.28262953027602167,
+      "l1": 0.03691717892164184,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 10.2141, scaling 2.3647, offsets 4.2999, hash 0.1358, masks 0.4871, MLPs 0.4471, Total 17.9488"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "hollywood",
+    "lambda": 0.005,
+    "fps": 214.69276,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 8.4771,
+      "psnr": 24.066531519736014,
+      "ssim": 0.7288413490018537,
+      "lpips": 0.3705447345010696,
+      "l1": 0.04263403134480599,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.8905, scaling 1.2875, offsets 1.4697, hash 0.1151, masks 0.2479, MLPs 1.4661, Total 8.4771"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 7.4712,
+      "psnr": 24.066531519736014,
+      "ssim": 0.7288413490018537,
+      "lpips": 0.3705447345010696,
+      "l1": 0.04263403134480599,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.8953, scaling 1.296, offsets 1.4696, hash 0.1151, masks 0.2479, MLPs 0.4471, Total 7.4712"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "pompidou",
+    "lambda": 0.001,
+    "fps": 200.37907,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 20.5391,
+      "psnr": 25.864573817099295,
+      "ssim": 0.8642461819033469,
+      "lpips": 0.21629979052851278,
+      "l1": 0.030041277168258544,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 10.7102, scaling 2.8255, offsets 4.8372, hash 0.1441, masks 0.556, MLPs 1.4661, Total 20.5391"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 19.6901,
+      "psnr": 25.864573817099295,
+      "ssim": 0.8642461819033469,
+      "lpips": 0.21629979052851278,
+      "l1": 0.030041277168258544,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 10.7196, scaling 2.9882, offsets 4.835, hash 0.1441, masks 0.556, MLPs 0.4471, Total 19.6901"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "pompidou",
+    "lambda": 0.005,
+    "fps": 240.54417,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 8.8894,
+      "psnr": 25.296728810956402,
+      "ssim": 0.8350018032135502,
+      "lpips": 0.25830247902101083,
+      "l1": 0.03323596595756469,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.8104, scaling 1.5629, offsets 1.6672, hash 0.1096, masks 0.273, MLPs 1.4661, Total 8.8894"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 7.9053,
+      "psnr": 25.296728810956402,
+      "ssim": 0.8350018032135502,
+      "lpips": 0.25830247902101083,
+      "l1": 0.03323596595756469,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.8203, scaling 1.5884, offsets 1.6668, hash 0.1096, masks 0.273, MLPs 0.4471, Total 7.9053"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "quebec",
+    "lambda": 0.001,
+    "fps": 169.55034,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 16.0636,
+      "psnr": 30.512951327908425,
+      "ssim": 0.9411917482652972,
+      "lpips": 0.1512800887707741,
+      "l1": 0.014793396386648379,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 8.3108, scaling 2.1564, offsets 3.5413, hash 0.1556, masks 0.4334, MLPs 1.4661, Total 16.0636"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 15.0683,
+      "psnr": 30.512951327908425,
+      "ssim": 0.9411917482652972,
+      "lpips": 0.1512800887707741,
+      "l1": 0.014793396386648379,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 8.3177, scaling 2.1735, offsets 3.5409, hash 0.1556, masks 0.4334, MLPs 0.4471, Total 15.0683"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "quebec",
+    "lambda": 0.005,
+    "fps": 196.87408,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 7.3044,
+      "psnr": 29.482901542417466,
+      "ssim": 0.9210951328277588,
+      "lpips": 0.19286775588989258,
+      "l1": 0.018031889122099645,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 2.9911, scaling 1.2613, offsets 1.2289, hash 0.1223, masks 0.2345, MLPs 1.4661, Total 7.3044"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 6.3056,
+      "psnr": 29.482901542417466,
+      "ssim": 0.9210951328277588,
+      "lpips": 0.19286775588989258,
+      "l1": 0.018031889122099645,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.0019, scaling 1.2708, offsets 1.2289, hash 0.1223, masks 0.2345, MLPs 0.4471, Total 6.3056"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "rome",
+    "lambda": 0.001,
+    "fps": 200.43506,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 19.99,
+      "psnr": 26.960064303490423,
+      "ssim": 0.8914727664762928,
+      "lpips": 0.18269890835208277,
+      "l1": 0.02705831591400408,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 10.44, scaling 2.6349, offsets 4.7434, hash 0.1491, masks 0.5564, MLPs 1.4661, Total 19.99"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 19.1796,
+      "psnr": 26.960064303490423,
+      "ssim": 0.8914727664762928,
+      "lpips": 0.18269890835208277,
+      "l1": 0.02705831591400408,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 10.451, scaling 2.8339, offsets 4.742, hash 0.1491, masks 0.5564, MLPs 0.4471, Total 19.1796"
+    }
+  },
+  {
+    "dataset": "bungeenerf",
+    "scene": "rome",
+    "lambda": 0.005,
+    "fps": 232.60536,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 8.9898,
+      "psnr": 25.652525009647494,
+      "ssim": 0.8501864921662116,
+      "lpips": 0.24060401416593982,
+      "l1": 0.03255972987221133,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.9835, scaling 1.5655, offsets 1.5363, hash 0.126, masks 0.3123, MLPs 1.4661, Total 8.9898"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 8.0129,
+      "psnr": 25.652525009647494,
+      "ssim": 0.8501864921662116,
+      "lpips": 0.24060401416593982,
+      "l1": 0.03255972987221133,
+      "n_test_cameras": 31,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.0001, feat 3.9919, scaling 1.5983, offsets 1.5372, hash 0.126, masks 0.3123, MLPs 0.4471, Total 8.0129"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "bicycle",
+    "lambda": 0.001,
+    "fps": 73.63673,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 23.1465,
+      "psnr": 25.12300964355469,
+      "ssim": 0.7408200359344482,
+      "lpips": 0.27052978992462157,
+      "l1": 0.03897291675209999,
+      "n_test_cameras": 25,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 1.5312, feat 11.4284, scaling 3.2524, offsets 4.6235, hash 0.1295, masks 0.7154, MLPs 1.4661, Total 23.1465"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 22.1432,
+      "psnr": 25.12300964355469,
+      "ssim": 0.7408200359344482,
+      "lpips": 0.27052978992462157,
+      "l1": 0.03897291675209999,
+      "n_test_cameras": 25,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 1.5312, feat 11.4396, scaling 3.2555, offsets 4.6248, hash 0.1295, masks 0.7154, MLPs 0.4471, Total 22.1432"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "bicycle",
+    "lambda": 0.005,
+    "fps": 95.13083,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 9.6447,
+      "psnr": 25.012132110595704,
+      "ssim": 0.718445646762848,
+      "lpips": 0.3116129553318024,
+      "l1": 0.039287635162472724,
+      "n_test_cameras": 25,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.9156, feat 3.6187, scaling 1.6249, offsets 1.6141, hash 0.1033, masks 0.302, MLPs 1.4661, Total 9.6447"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 8.6425,
+      "psnr": 25.012132110595704,
+      "ssim": 0.718445646762848,
+      "lpips": 0.3116129553318024,
+      "l1": 0.039287635162472724,
+      "n_test_cameras": 25,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.9156, feat 3.6236, scaling 1.6367, offsets 1.6142, hash 0.1033, masks 0.302, MLPs 0.4471, Total 8.6425"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "garden",
+    "lambda": 0.001,
+    "fps": 70.28027,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 22.8438,
+      "psnr": 27.557829697926838,
+      "ssim": 0.8516413470109304,
+      "lpips": 0.13873870639751354,
+      "l1": 0.027240892173722386,
+      "n_test_cameras": 24,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 1.2947, feat 11.2424, scaling 3.0348, offsets 5.0353, hash 0.1092, masks 0.6612, MLPs 1.4661, Total 22.8438"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 21.8387,
+      "psnr": 27.557829697926838,
+      "ssim": 0.8516413470109304,
+      "lpips": 0.13873870639751354,
+      "l1": 0.027240892173722386,
+      "n_test_cameras": 24,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 1.2947, feat 11.2508, scaling 3.0376, offsets 5.0381, hash 0.1092, masks 0.6612, MLPs 0.4471, Total 21.8387"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "garden",
+    "lambda": 0.005,
+    "fps": 90.87784,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 10.3803,
+      "psnr": 26.955222209294636,
+      "ssim": 0.8220709015925726,
+      "lpips": 0.19861984997987747,
+      "l1": 0.02983568833830456,
+      "n_test_cameras": 24,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.9524, feat 4.0584, scaling 1.7765, offsets 1.6992, hash 0.0916, masks 0.3361, MLPs 1.4661, Total 10.3803"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 9.3717,
+      "psnr": 26.955222209294636,
+      "ssim": 0.8220709015925726,
+      "lpips": 0.19861984997987747,
+      "l1": 0.02983568833830456,
+      "n_test_cameras": 24,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.9524, feat 4.0656, scaling 1.7802, offsets 1.6987, hash 0.0916, masks 0.3361, MLPs 0.4471, Total 9.3717"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "stump",
+    "lambda": 0.001,
+    "fps": 127.85705,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 15.4677,
+      "psnr": 26.837297201156616,
+      "ssim": 0.7664345167577267,
+      "lpips": 0.2656654743477702,
+      "l1": 0.03215305448975414,
+      "n_test_cameras": 16,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 1.0822, feat 7.427, scaling 2.0862, offsets 2.8349, hash 0.1299, masks 0.4414, MLPs 1.4661, Total 15.4677"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 14.4777,
+      "psnr": 26.837297201156616,
+      "ssim": 0.7664345167577267,
+      "lpips": 0.2656654743477702,
+      "l1": 0.03215305448975414,
+      "n_test_cameras": 16,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 1.0822, feat 7.4339, scaling 2.1095, offsets 2.8337, hash 0.1299, masks 0.4414, MLPs 0.4471, Total 14.4777"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "stump",
+    "lambda": 0.005,
+    "fps": 148.74138,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 6.9025,
+      "psnr": 26.644896030426025,
+      "ssim": 0.7516728490591049,
+      "lpips": 0.3023808794096112,
+      "l1": 0.03317034163046628,
+      "n_test_cameras": 16,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.6337, feat 2.6059, scaling 1.0678, offsets 0.8502, hash 0.0852, masks 0.1936, MLPs 1.4661, Total 6.9025"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 5.8921,
+      "psnr": 26.644896030426025,
+      "ssim": 0.7516728490591049,
+      "lpips": 0.3023808794096112,
+      "l1": 0.03317034163046628,
+      "n_test_cameras": 16,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.6337, feat 2.6102, scaling 1.0722, offsets 0.8501, hash 0.0852, masks 0.1936, MLPs 0.4471, Total 5.8921"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "room",
+    "lambda": 0.001,
+    "fps": 125.53198,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 6.215,
+      "psnr": 32.145401196602066,
+      "ssim": 0.9274204449775891,
+      "lpips": 0.20583150516717863,
+      "l1": 0.015597988612567767,
+      "n_test_cameras": 39,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.4362, feat 2.2481, scaling 0.9576, offsets 0.8885, hash 0.0441, masks 0.1743, MLPs 1.4661, Total 6.215"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 5.2034,
+      "psnr": 32.145401196602066,
+      "ssim": 0.9274204449775891,
+      "lpips": 0.20583150516717863,
+      "l1": 0.015597988612567767,
+      "n_test_cameras": 39,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.4362, feat 2.2517, scaling 0.9614, offsets 0.8886, hash 0.0441, masks 0.1743, MLPs 0.4471, Total 5.2034"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "room",
+    "lambda": 0.005,
+    "fps": 150.22926,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 3.3419,
+      "psnr": 31.521649091671673,
+      "ssim": 0.9143282862809988,
+      "lpips": 0.23602849665360573,
+      "l1": 0.016805542561297234,
+      "n_test_cameras": 39,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.2909, feat 0.6223, scaling 0.4658, offsets 0.3484, hash 0.0543, masks 0.094, MLPs 1.4661, Total 3.3419"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 2.3293,
+      "psnr": 31.521649091671673,
+      "ssim": 0.9143282862809988,
+      "lpips": 0.23602849665360573,
+      "l1": 0.016805542561297234,
+      "n_test_cameras": 39,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.2909, feat 0.624, scaling 0.4705, offsets 0.3484, hash 0.0543, masks 0.094, MLPs 0.4471, Total 2.3293"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "counter",
+    "lambda": 0.001,
+    "fps": 87.84486,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 8.573,
+      "psnr": 29.869879277547202,
+      "ssim": 0.9190294067064921,
+      "lpips": 0.1882155587275823,
+      "l1": 0.01708779726177454,
+      "n_test_cameras": 30,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.4745, feat 3.9305, scaling 1.1324, offsets 1.2608, hash 0.0828, masks 0.2259, MLPs 1.4661, Total 8.573"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 7.5638,
+      "psnr": 29.869879277547202,
+      "ssim": 0.9190294067064921,
+      "lpips": 0.1882155587275823,
+      "l1": 0.01708779726177454,
+      "n_test_cameras": 30,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.4745, feat 3.9346, scaling 1.1384, offsets 1.2606, hash 0.0828, masks 0.2259, MLPs 0.4471, Total 7.5638"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "counter",
+    "lambda": 0.005,
+    "fps": 102.85511,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 4.6778,
+      "psnr": 29.254777590433758,
+      "ssim": 0.9065065821011861,
+      "lpips": 0.21152773400147756,
+      "l1": 0.018750312055150667,
+      "n_test_cameras": 30,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.3706, feat 1.4033, scaling 0.6817, offsets 0.551, hash 0.0652, masks 0.1398, MLPs 1.4661, Total 4.6778"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 3.6665,
+      "psnr": 29.254777590433758,
+      "ssim": 0.9065065821011861,
+      "lpips": 0.21152773400147756,
+      "l1": 0.018750312055150667,
+      "n_test_cameras": 30,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.3706, feat 1.406, scaling 0.6867, offsets 0.551, hash 0.0652, masks 0.1398, MLPs 0.4471, Total 3.6665"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "kitchen",
+    "lambda": 0.001,
+    "fps": 66.67843,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 9.6398,
+      "psnr": 31.836550303867885,
+      "ssim": 0.9317363517624991,
+      "lpips": 0.12371609679290227,
+      "l1": 0.01640458349138498,
+      "n_test_cameras": 35,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.4969, feat 4.3764, scaling 1.2218, offsets 1.7122, hash 0.0789, masks 0.2876, MLPs 1.4661, Total 9.6398"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 8.678,
+      "psnr": 31.836550303867885,
+      "ssim": 0.9317363517624991,
+      "lpips": 0.12371609679290227,
+      "l1": 0.01640458349138498,
+      "n_test_cameras": 35,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.4969, feat 4.381, scaling 1.2746, offsets 1.7119, hash 0.0789, masks 0.2876, MLPs 0.4471, Total 8.678"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "kitchen",
+    "lambda": 0.005,
+    "fps": 82.32664,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 5.2108,
+      "psnr": 30.976790945870537,
+      "ssim": 0.9190279075077602,
+      "lpips": 0.1461124775665147,
+      "l1": 0.01837168391793966,
+      "n_test_cameras": 35,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.3902, feat 1.361, scaling 1.1459, offsets 0.6338, hash 0.0494, masks 0.1644, MLPs 1.4661, Total 5.2108"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 4.1989,
+      "psnr": 30.976790945870537,
+      "ssim": 0.9190279075077602,
+      "lpips": 0.1461124775665147,
+      "l1": 0.01837168391793966,
+      "n_test_cameras": 35,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.3902, feat 1.3645, scaling 1.1495, offsets 0.6338, hash 0.0494, masks 0.1644, MLPs 0.4471, Total 4.1989"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "bonsai",
+    "lambda": 0.001,
+    "fps": 90.19857,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 9.4252,
+      "psnr": 33.38831984030234,
+      "ssim": 0.9504538822818447,
+      "lpips": 0.18512989661178073,
+      "l1": 0.012937308389794183,
+      "n_test_cameras": 37,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.7128, feat 3.8394, scaling 1.6634, offsets 1.3699, hash 0.0904, masks 0.2831, MLPs 1.4661, Total 9.4252"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 8.4185,
+      "psnr": 33.38831984030234,
+      "ssim": 0.9504538822818447,
+      "lpips": 0.18512989661178073,
+      "l1": 0.012937308389794183,
+      "n_test_cameras": 37,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.7128, feat 3.8476, scaling 1.669, offsets 1.3684, hash 0.0904, masks 0.2831, MLPs 0.4471, Total 8.4185"
+    }
+  },
+  {
+    "dataset": "mipnerf360",
+    "scene": "bonsai",
+    "lambda": 0.005,
+    "fps": 109.76217,
+    "fp32": {
+      "variant": "fp32",
+      "iteration": 30000,
+      "mlp_size_MB": 1.4661331176757812,
+      "total_size_MB": 5.0461,
+      "psnr": 32.47401484927616,
+      "ssim": 0.942240600650375,
+      "lpips": 0.2007386938140199,
+      "l1": 0.01444850376228223,
+      "n_test_cameras": 37,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.5394, feat 1.3023, scaling 0.8317, offsets 0.675, hash 0.0624, masks 0.1692, MLPs 1.4661, Total 5.0461"
+    },
+    "int8": {
+      "variant": "int8",
+      "iteration": 30000,
+      "mlp_size_MB": 0.44710731506347656,
+      "total_size_MB": 4.0476,
+      "psnr": 32.47401484927616,
+      "ssim": 0.942240600650375,
+      "lpips": 0.2007386938140199,
+      "l1": 0.01444850376228223,
+      "n_test_cameras": 37,
+      "estimate_final_bits_log": "\nEstimated sizes in MB: anchor 0.5394, feat 1.3057, scaling 0.8487, offsets 0.6751, hash 0.0624, masks 0.1692, MLPs 0.4471, Total 4.0476"
+    }
+  }
+]
