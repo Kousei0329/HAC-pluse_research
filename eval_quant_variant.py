@@ -62,6 +62,10 @@ def main():
                          help="If >=0, save the rendered test-camera image at this index (plus "
                               "ground truth, on the first call site that needs it) alongside "
                               "--out_json, for qualitative before/after comparison figures.")
+    parser.add_argument("--save_all_images", action='store_true', default=False,
+                         help="Save every test-camera's rendered image (plus ground truth) "
+                              "instead of just --save_image_idx. Takes priority over "
+                              "--save_image_idx if both are set.")
     parser.add_argument("--save_image_dir", type=str, default=None)
     args = parser.parse_args()
 
@@ -161,7 +165,7 @@ def main():
             psnr_sum += psnr(image, gt_image).mean().item()
             ssim_sum += ssim(image, gt_image).mean().item()
             lpips_sum += lpips_fn(image, gt_image, normalize=False).detach().mean().item()
-            if idx == args.save_image_idx:
+            if args.save_all_images or idx == args.save_image_idx:
                 import torchvision
                 out_dir = args.save_image_dir or os.path.dirname(args.out_json)
                 os.makedirs(out_dir, exist_ok=True)
