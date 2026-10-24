@@ -1,0 +1,2 @@
+lmbda      size       psnr       ssim       lpips      anchor     total feat feat0      feat1      feat2      feat3      scaling    offsets    masks      MLPs       triplane_f
+0.0020     20.7827    25.2153    0.7402     0.2745     3.5354     10.0944    1.2821     2.3962     3.1263     3.2898     2.9584     3.1207     0.5464     0.3525     0.1749    
